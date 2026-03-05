@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Space</title>
+    
+    <!-- 外部依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.11/dist/interact.min.js"></script>
+    
+    <!-- 样式 -->
+    <link rel="stylesheet" href="../css/app.css">
+    
+    <!-- 主应用脚本 -->
+    <script type="module" src="../js/appv2.js"></script>
+</head>
+<body>
+    <!-- 移动端菜单遮罩 -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    
+    <div class="app-container">
+        <!-- 左侧操作面板 -->
+        <nav class="sidebar" id="sidebar">
+            <div class="logo">Panel</div>
+            
+            <div class="menu-section">
+                <div class="menu-title">User</div>
+                <div class="menu-item" id="user-menu">
+                    <span class="menu-icon">👤</span>
+                    <span>未登录</span>
+                </div>
+            </div>
+            
+            <div class="menu-section">
+                <div class="menu-title">Add item</div>
+                <div class="menu-item" data-action="Chart">
+                    <span class="menu-icon">📈</span>
+                    <span>图表</span>
+                </div>
+                <div class="menu-item" data-action="Table">
+                    <span class="menu-icon">📊</span>
+                    <span>表格</span>
+                </div>
+                <div class="menu-item" data-action="Monitor">
+                    <span class="menu-icon">🔴</span>
+                    <span>监视器</span>
+                </div>
+                <div class="menu-item" data-action="Program">
+                    <span class="menu-icon">⚙️</span>
+                    <span>程序段</span>
+                </div>
+                <div class="menu-item" data-action="Switch">
+                    <span class="menu-icon">🔘</span>
+                    <span>开关</span>
+                </div>
+            </div>
+            
+            <div class="menu-section">
+                <div class="menu-item" data-action="toggle-edit">
+                    <span class="menu-icon">✏️</span>
+                    <span>Edit-Model</span>
+                </div>
+            </div>
+            
+            <div class="menu-section">
+                <div class="menu-item" data-action="open-devices">
+                    <span class="menu-icon">🔌</span>
+                    <span>Devices</span>
+                </div>
+            </div>
+            
+            <div class="menu-section">
+                <div class="menu-title">Config</div>
+                <div class="menu-item" data-action="export">
+                    <span class="menu-icon">💾</span>
+                    <span>Export</span>
+                </div>
+                <div class="menu-item" data-action="import">
+                    <span class="menu-icon">📂</span>
+                    <span>Import</span>
+                </div>
+                <div class="menu-item" data-action="toggle-theme">
+                    <span class="menu-icon">🌓</span>
+                    <span>Style</span>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- 主区域 -->
+        <div class="main-content">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <button class="menu-toggle" id="menu-toggle">☰</button>
+                <div class="mode-switcher">
+                    <button class="mode-btn active" data-mode="view">查看模式</button>
+                    <button class="mode-btn" data-mode="edit">✏️ 编辑模式</button>
+                </div>
+                <div id="theme-toggle"> L/D </div>
+            </header>
+            
+            <!-- 仪表盘 -->
+            <main class="content-area" id="content-area">
+                <div class="dashboard-grid" id="dashboard-grid">
+                    <!-- 动态添加的块 -->
+                </div>
+            </main>
+        </div>
+        
+        <!-- 模态框容器 -->
+        <div id="modal-container"></div>
+        
+        <!-- 右键菜单 -->
+        <div id="context-menu" class="context-menu">
+            <div class="context-item" data-action="resize-1x1">1x1</div>
+            <div class="context-item" data-action="resize-2x1">2x1</div>
+            <div class="context-item" data-action="resize-1x2">1x2</div>
+            <div class="context-item" data-action="resize-2x2">2x2</div>
+            <div class="context-item" data-action="resize-3x2">3x2</div>
+            <hr>
+            <div class="context-item" data-action="delete">删除</div>
+        </div>
+        
+        <!-- 设备管理页面 -->
+        <div class="device-page-container" id="device-page">
+            <div class="device-page-content">
+                <h2>设备管理</h2>
+                <p>设备配置页面内容...</p>
+                <button onclick="app.closeDevicePage()">返回</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

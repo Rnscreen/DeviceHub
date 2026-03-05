@@ -1,0 +1,8 @@
+fastapi==0.121.3
+pydantic==2.12.5
+pydantic-settings==2.12.0
+pyyaml==6.0.3
+python-dotenv==1.2.1
+uvicorn==0.38.0
+websockets==12.0
+watchdog==4.0.0

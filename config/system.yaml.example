@@ -1,0 +1,74 @@
+# config/system.yaml
+# 应用基本信息
+app:
+  name: "DeviceHub"
+  version: "0.1.0"
+  description: "An Industrial Devices Manager"
+  
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  reload: true
+  
+# 安全配置
+security:
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+    - "http://localhost:8080"
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+  api_key_required: false
+  
+# 数据库配置
+database:
+  type: "sqlite"  # sqlite, postgres, mysql
+  sqlite:
+    journal_mode: "WAL"
+  # postgres: 暂未实现
+  #   host: "localhost"
+  #   port: 5432
+  #   database: "industrial_gateway"
+  #   username: "postgres"
+  #   password: "password"
+  
+# 监控配置
+monitoring:
+  polling:
+    interval: 1.0 #未在设备设置超时的，默认使用1秒
+    enabled: true #默认启用轮询
+  alerting: #未实现
+    enabled: true
+    webhook_url: ""
+    email_notifications: false  #alerting发送邮件
+  metrics:  #未实现
+    enabled: true
+    export_port: 9090
+    
+# 日志配置
+logging:
+  level: "INFO"
+  file:
+    enabled: true
+    path: "logs/industrial_gateway.log"
+    max_size_mb: 100
+    backup_count: 5
+  console:
+    enabled: true
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 以下暂未实现
+# # WebSocket配置
+# websocket:
+#   heartbeat_interval: 30
+#   max_connections: 100
+#   max_message_size: 1048576  # 1MB
+  
+# # 设备通信
+# device_communication:
+#   default_timeout: 5.0
+#   reconnect_interval: 10.0
+#   max_retries: 3

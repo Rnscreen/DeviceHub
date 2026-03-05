@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备面板</title>
+    <link rel="stylesheet" href="css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="js/modules/echarts.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fas fa-industry"></i>
+                <h1>设备面板</h1>
+            </div>
+            <div class="status-indicator">
+                <div class="connection-status">
+                    <span>连接状态:</span>
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">未连接</span>
+                </div>
+                <span id="deviceCount">设备: 0</span>
+                <span id="lastUpdate">最后更新: --:--:--</span>
+            </div>
+        </header>
+        
+        <div class="layout">
+            <!-- 左侧：设备列表 -->
+            <div class="panel">
+                <div class="panel-title">
+                    <i class="fas fa-microchip"></i>
+                    <span>设备列表</span>
+                </div>
+                
+                <div class="connection-form">
+                    <input type="text" id="wsUrl" class="url-input" value="ws://localhost:8000/ws/" placeholder="输入WebSocket URL">
+                </div>
+                
+                <div class="device-list" id="deviceList">
+                    <!-- 设备列表将通过JavaScript动态生成 -->
+                </div>
+            </div>
+            
+            <!-- 中间：实时数据显示 -->
+            <div class="panel">
+                <div class="panel-title">
+                    <i class="fas fa-chart-line"></i>
+                    <span>实时监控</span>
+                    <span id="currentDevice" style="font-size: 1rem; color: #7f8c8d; margin-left: auto;">未选择设备</span>
+                </div>
+                
+                <div class="data-display" id="dataDisplay">
+                    <!-- 实时数据将通过JavaScript动态生成 -->
+                    <div class="empty-state" style="text-align: center; padding: 40px; color: #bdc3c7;">
+                        <i class="fas fa-tachometer-alt" style="font-size: 3rem; margin-bottom: 15px;"></i>
+                        <h3>无设备数据</h3>
+                        <p>请从左侧选择一个设备进行监控</p>
+                    </div>
+                </div>
+                
+                <div class="chart-container" id="chartsContainer">
+                    <!-- 图表将通过JavaScript动态生成，每个设备一个图表 -->
+                </div>
+            </div>
+            
+            <!-- 右侧：控制面板 -->
+            <div class="panel">
+                <div class="panel-title">
+                    <i class="fas fa-sliders-h"></i>
+                    <span>设备控制</span>
+                </div>
+                
+                <div class="control-form">
+                    <div class="form-group">
+                        <label for="controlDevice">目标设备</label>
+                        <select id="controlDevice" disabled>
+                            <option value="">请先选择设备</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="controlCommand">控制指令</label>
+                        <select id="controlCommand" disabled>
+                            <option value="">请先选择指令</option>
+                        </select>
+                    </div>
+                    
+                    <div id="paramsContainer" class="params-container"> </div>
+                    
+                    <button id="sendControlBtn" class="btn btn-primary">
+                        <i class="fas fa-paper-plane"></i> 发送控制指令
+                    </button>
+                    
+                    <div class="form-group">
+                        <label>批量指令 (JSON格式)</label>
+                        <textarea id="batchCommands" rows="6" placeholder='例如: [
+  {"device": "tc1", "command": "SetTemperature", "value": 25.0},
+  {"device": "vg1", "command": "SetPressure", "value": 1.2}
+]'></textarea>
+                    </div>
+                    
+                    <button id="sendBatchBtn" class="btn btn-secondary">
+                        <i class="fas fa-play-circle"></i> 执行批量指令
+                    </button>
+                </div>
+                
+                <div class="logs" id="logPanel">
+                    <div class="log-entry">
+                        <span class="log-time">[10:00:00]</span>
+                        <span class="log-info">系统启动，等待连接设备...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>工业设备监控网关前端界面 | 版本 1.0 | 实时数据通过WebSocket推送</p>
+        </div>
+    </div>
+
+    <script type="module" src="js/appv1.js"></script>
+</body>
+</html>

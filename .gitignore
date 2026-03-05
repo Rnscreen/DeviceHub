@@ -1,0 +1,56 @@
+# DW cache
+_notes/
+dwsync.xml
+
+# 私有配置
+*.yaml
+*.yml
+
+# test files
+tests/
+
+# database
+*.db
+
+# backup files
+*copy.*
+*.bak
+*.backup
+*.old
+*.tmp
+*.temp
+
+# system files
+.DS_Store
+Thumbs.db
+.desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# python run
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+build/
+*.so
+.Python
+
+# python venv
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# log and outputs
+*.log
+*.out
+*.pid
+*.seed

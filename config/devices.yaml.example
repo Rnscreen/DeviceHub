@@ -1,0 +1,40 @@
+devices:
+  device1:
+    id: "deivce1" # 同上
+   
+    name: "name" # 一些基本信息
+    type: "temperature_controller"
+    vendor: "vendore"
+    
+    model: "protocol" # 型号，决定协议文件名
+    version: "v1.0" # 协议版本号，决定协议文件名
+
+    enabled: true # 是否启用
+
+    connection:
+      # address: "00" # rs485或者其他多设备网路使用
+      host: "127.0.0.1" # Host TCP|Modbus_TCP|TCP_over_serial
+      port: 15000 # Port
+      timeout: 0.3  # 连接、发送等命令的默认超时
+
+    enabled_channels: # 启用的通道，需要与protocol中的模板对应
+      inputs: ["A","B"]
+      outputs: ["1"]
+
+    poll: # 轮询配置
+      poll_interval: 1.0  # 轮询基础频率
+      poll_slow: 5  # 每几次更新一次慢监控
+      poll_status: 10 # 每几次轮询更新一次status
+      monitoring: ["temperature", "power"]  # 暂未启用，未来计划制定websocket推送项目
+      saver: ["temperature","power"] # 暂未启用，未来计划制定数据库服务保存项目
+
+    tags:
+      location: "机柜"
+    description: "Other description of device1"
+
+# 设备分组
+groups:
+  chamber:
+    name: "机柜"
+    devices: ["test1"]
+    description: "位于机柜中的设备"

@@ -1,0 +1,165 @@
+# 1. 基本定义
+name: name
+version: version
+device_type: device_type
+
+protocol_type: 'tcp' #tcp|modbus_tcp|modbus_rtu|serial|usb
+
+# 2. 通道定义:
+channels:
+  main: main  #如果通道为str, 仅用来创建数据结构, 不会参与通道操作, 前端显示为无参数, 不受enabled_channel激活
+  group1: list[] # ASCII模式, 通道为List, 只需要通道名
+  # group2: #dict[str,config] #modbus模式 ，提供地址、字节数、数值类型、缩放因子，顺序等
+  #   channel1:
+  #     address: address  #寄存器地址
+  #     size: size #读写 字节数
+  #     type: type #读写 类型 int16,uint16,int32,uint32,float,double,hex,str(to ascii)
+  #     order: order #顺序
+  #     factor: factor #读写 缩放因子
+
+  ...
+
+# 3. 枚举定义
+enums:
+  # 极高自由度，例如
+  label: #实例，并非实际结构
+    channel: channel_label  #label映射，可以为内部通道id绑定自定义label
+  status_code:  #状态码映射实例，并非实际结构
+    "01": ON
+    "00": OFF
+  response_code:  #响应码映射实例，并非实际结构
+    "00": OK
+    "01": Command Error
+    "02": Parameter Error
+    ...
+  ...
+
+# 4. 数据结构定义
+data:
+  # 监视器 (高频)
+  monitor_fast:
+    data_type: 
+      description: '读取data_type'
+      channel: channel #从上面选group# 这里指定通道组。轮询时, 会寻找对应的 get_all_temperature parse
+      # max: maximum ### 可选, 如果返回值超过则在poll_data中标记 high alarm(新)
+      # min: minimum ### 可选, 如果返回值超过则在poll_data中标记 low alarm
+      type: str ### 可选, 默认为str, 可按需求设置为 float, int 等(如果有尽量用float/int, 因为str会占用更多内存)
+    ...
+  # 监视器 (低频) 同上
+  monitor_slow:
+  ...
+
+  stream: #用于数据流的推送, 系统默认不保存, 仅广播到ws, 通过前端解析, 主要应用:示波器, 相机等
+    stream1:
+      description: 'stream1数据流'
+      channel: channel
+
+  # 状态监视,低频,同monitor
+  status:
+    heating: #示例
+      description: "加热状态"
+      # channel: main 可选,默认为main, 对于某些数据可能需要通道信息
+    ### status在轮询时,会对比与 data_cache的变化, 只返回变化的部分
+    ...
+
+  # 静态信息, 极低频, 仅在连接\重连到设备时读取一次, 同status
+  info:
+    sw_version: #示例
+      description: "获取软件版本"
+      channel: main
+    ...
+
+# 5. 控制器定义
+controls:
+  data_type:
+    description: '设置data_type'
+    channel: channel #同上
+    # max: maximum ###可选, 超过范围则提前返回失败, 不执行控制命令(新, 如果说明书有范围限制, 则需要添加)
+    # min: minimum ###可选
+    value: float #value:float,int,str
+    # enum: enum #与value互斥, 意为只能从上面定义的enum/channels中选取参数
+
+# 6. 通信协议格式
+protocols:
+  multisend: True  #打开后, poll多行发送, 而非每个通道单独进行send-response轮询, 需验证设备支持性
+  # 示例 poll temperature, multisend: True:
+    # send: command1\r\ncommand2\r\n
+    # response: response1\r\nresponse2\r\n
+  # multisend: False:
+    # send: command1\r\n
+    # response: response1\r\n
+    # send: command2\r\n
+    # response: response2\r\n
+  # 终止\分隔符为以下terminator定义
+
+  send: "{prefix}{address}{command}{verify}" 
+    # 分隔是' '还是','等';'由用户定义, 在send格式中通过匹配获取
+    # {prefix} 需要根据协议说明,在此处替换成正确的前缀
+    # {address} 可选, 会被RS485模式用设备配置中的address地址替换(保留{address}占位符且设备配置的connection中需要有address字段), 或直接在此处硬编码
+    # {verify} 占位符, 可选, 如果选用,请在下方verify字段声明校验方法
+    # 最简示例: send: "{command} {data}\r\n",
+
+  #verify: 校验方法，可选, 可选值: crc16,crc32,ccitt,lrc,checksum,自定义函数(直接输入eval表达式)
+  #verify: Null
+
+  response: "{prefix}{response_code}{response_data}"
+    # {prefix} 需要根据协议说明,替换成正确的前缀
+  send_terminator: "\r\n"
+    # send专用的发送终止符, 用于send, multisend模式下也用来对多行发送进行分割
+  recv_terminator: "\r\n"
+    # recv专用的接收终止符, 用于readuntil, multisend模式下也用来对多行响应进行分割
+
+  error: "{prefix}{response_code}{response}"
+    # 可选, response的分支, 如果response在错误响应码里(应在enums定义)
+    # error_code: response_code
+    # error_data: response_data
+    # timestamp: timestamp
+    # 如果匹配该格式,直接返回错误数据,它将以 f'{response_code:response_data}'的格式生成一条新的数据进行logger.error并存到数据库中, 同时该步的get\set等其他函数的返回None
+    # 不进入parse解析过程
+
+#7. 命令定义(send)
+command:
+  ### 以下xxx代之了数据名称 temperature\power\press等
+  get_xxx: "INPut? {channel}" #当前为示例, command的具体命令, monitor\info\status会默认构建为get_xxx
+  # get_default: "03{channel}" #modbus 示例,使用modbus通道配置,可以进行默认方法构建而非单独设置
+  set_xxx: "Loop: {channel}?" #command的具体命令, controls会默认构建为 set_xxx
+  get_all_xxx: "INPut? A;B;C;D" #可选的高级方法, poll_data中优先使用该命令进行构建, 用以减少通讯开销, 依赖设备协议支持
+  # 存在优先级 get_all_xxx > get_xxx > get_default, 如果都没有, 则该数据data及通道channels配置错误
+  ...
+
+# 8. 解析定义(response)
+### response 原始响应, (如果在response定义了response_code响应码, response_data响应数据,则该参数可用)
+### 可调使用 data调用协议内self.data_cache内储存的数据,如 $data.info.unit.main 指代了 self.data_cache['info']['unit']['main']
+### 可使用 enum 根据键获取枚举列表内的值,enum.status_code.v1 (假设这里的v1为'00', 则输出为 "ON" (self.enums[status_code]['00']的值)
+parse:
+  # 8.1 单点数据获取 Parse (对应 get_xxx 命令)
+  get_temperature:
+    steps: #原先为字典, 无法使用多种方法, 现在使用名为steps的列表, 支持多步数操作
+      - method: "regex"
+        params:
+          # 存入 vars[] 之中
+          pattern: "([+-]?\d+\.?\d*)[CKF]?"
+          # 如有多个setp, vars 默认为最后一步的结果
+    result: "vars[0]" # 单点结果, 直接赋值给 data_cache[monitor][temperature][通道名]
+
+  # 8.2 批量数据获取 Parse (对应 get_all_xxx 命令)
+  get_all_temperature:
+    steps:
+      - method: "split"
+        params:
+          separator: ";"
+        # 假设响应: "25.1;26.3;ERR"
+        # vars = ["25.1", "26.3","ERR"]
+    package: #get_all中,使用 package 代替 result, 它将会把channel(list)和正则\分隔结果做匹配,打包成 {channel:value}的结构存入data_cache
+      # 关键：引用协议顶部定义的通道组
+      channel_group: "group1"  # 对应 channels.group1
+
+  # 8.3 控制命令 Parse (对应 set_xxx 命令)
+  set_setpoint:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "(OK|ERROR)"
+    # 可选：触发一个后续的get操作来验证
+    update: "setpoint"
+    result: "vars[0] == 'OK'"

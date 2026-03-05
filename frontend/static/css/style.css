@@ -1,0 +1,509 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #f5f7fa;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e1e5eb;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.logo i {
+    font-size: 2.5rem;
+    color: #4a6cf7;
+}
+
+.logo h1 {
+    font-size: 2.2rem;
+    color: #2c3e50;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-radius: 30px;
+    background-color: #f8f9fa;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #e74c3c;
+}
+
+.status-dot.connected {
+    background-color: #2ecc71;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 300px 1fr 350px;
+    gap: 20px;
+    height: calc(100vh - 150px);
+}
+
+.panel {
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+    padding: 20px;
+    overflow: hidden;
+    overflow-y: auto; /* 内容区域可滚动 */
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eaeaea;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.device-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.device-item {
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid #eaeaea;
+}
+
+.device-item:hover {
+    background-color: #f8f9fa;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 10px rgba(0,0,0,0.05);
+}
+
+.device-item.active {
+    background-color: #eef4ff;
+    border-color: #4a6cf7;
+}
+
+.device-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.device-type {
+    font-size: 0.9rem;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+}
+
+.device-status {
+    font-size: 0.85rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    display: inline-block;
+}
+
+.status-online {
+    background-color: #d5f4e6;
+    color: #27ae60;
+}
+
+.status-offline {
+    background-color: #fadbd8;
+    color: #e74c3c;
+}
+
+.data-display {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 15px;
+    overflow-y: hidden;
+    flex-shrink: 0; /* 防止被压缩 */
+    padding-right: 5px;
+    padding-bottom: 15px;
+}
+
+.data-card {
+    background-color: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    border-left: 4px solid #4a6cf7;
+}
+
+.data-card.temperature {
+    border-left-color: #e74c3c;
+}
+
+.data-card.pressure {
+    border-left-color: #3498db;
+}
+
+.data-card.power {
+    border-left-color: #f39c12;
+}
+
+.data-card.setpoint {
+    border-left-color: #9b59b6;
+}
+
+.data-label {
+    font-size: 0.95rem;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+}
+
+.data-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.data-unit {
+    font-size: 0.9rem;
+    color: #7f8c8d;
+}
+
+.data-time {
+    font-size: 0.8rem;
+    color: #bdc3c7;
+    margin-top: 8px;
+}
+
+.control-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #2c3e50;
+}
+
+select, input, textarea {
+    padding: 12px 15px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    font-size: 1rem;
+    transition: border 0.3s;
+}
+
+select:focus, input:focus, textarea:focus {
+    border-color: #4a6cf7;
+    outline: none;
+}
+
+.btn {
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.btn-primary {
+    background-color: #4a6cf7;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #3a5ce5;
+}
+
+.btn-secondary {
+    background-color: #f8f9fa;
+    color: #333;
+    border: 1px solid #ddd;
+}
+
+.btn-secondary:hover {
+    background-color: #e9ecef;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.logs {
+    margin-top: 20px;
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    background-color: #1e1e1e;
+    color: #f1f1f1;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.log-entry {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+}
+
+.log-time {
+    color: #7f8c8d;
+}
+
+.log-info {
+    color: #3498db;
+}
+
+.log-success {
+    color: #2ecc71;
+}
+
+.log-warning {
+    color: #f39c12;
+}
+
+.log-error {
+    color: #e74c3c;
+}
+
+.connection-form {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.url-input {
+    flex: 1;
+}
+
+.footer {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #eaeaea;
+    text-align: center;
+    color: #7f8c8d;
+    font-size: 0.9rem;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+    .layout {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    
+    .data-display {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
+}
+
+.device-item.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.status-disabled {
+    background-color: #bdc3c7;
+    color: #7f8c8d;
+}
+
+.device-tags {
+    margin-bottom: 8px;
+}
+
+.tag {
+    display: inline-block;
+    background-color: #eef4ff;
+    color: #4a6cf7;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-right: 5px;
+}
+
+.device-desc {
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    margin-top: 5px;
+    font-style: italic;
+}
+
+.data-param {
+    font-size: 0.8rem;
+    color: #27ae60;
+    margin-top: 5px;
+}
+
+.charts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.device-chart {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.chart-title {
+    font-weight: bold;
+    font-size: 14px;
+    color: #333;
+}
+
+.chart-legend {
+    font-size: 12px;
+    color: #666;
+}
+
+/* 性能优化：减少重绘 */
+.chart-content {
+    will-change: transform;
+    contain: layout style paint;
+}
+
+/* 红绿指示灯图标 */
+/* 基础图标样式 */
+.circle {
+  width: 16px;            /* 图标宽度 */
+  height: 16px;           /* 图标高度，与宽度相同形成圆形 */
+  border-radius: 50%;     /* 关键：设置为50%形成圆形 */
+  display: inline-block;  /* 确保正确显示 */
+  font-size: 16px;
+  margin-right: 5px;
+}
+
+/* 在线状态 - 绿色 */
+.circle.online {
+  /* background-color: #52c41a; */
+  background-color: #db5656;
+  font-size: 16px;
+}
+
+/* 离线状态 - 红色 */
+.circle.offline {
+  /* background-color: #cc2222; */
+  font-size: 16px;
+}
+
+/* 禁用状态 - 灰色 */
+.circle.disabled {
+  /* background-color: #bfbfbf; */
+  font-size: 16px;
+}
+
+/* 控制参数容器 */
+.params-container {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.param-group {
+    margin-bottom: 15px;
+}
+
+.param-group:last-child {
+    margin-bottom: 0;
+}
+
+.param-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    font-size: 14px;
+    color: #333;
+}
+
+.param-input {
+    width: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.param-input:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
