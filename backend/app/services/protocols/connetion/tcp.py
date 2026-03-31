@@ -114,7 +114,7 @@ class TcpConnection(IConnection):
             while True:
                 chunk = await asyncio.wait_for(
                     self._reader.read(256),
-                    timeout=self.timeout
+                    timeout = self.timeout
                 )
                 if not chunk:
                     self._connected = False
@@ -124,7 +124,7 @@ class TcpConnection(IConnection):
                 
                 if terminator in buffer:
                     result = bytes(buffer)
-                    self.logger.debug(f"Read until terminator: {result}")
+                    # self.logger.debug(f"Read until terminator: {result}")
                     return result
                 
                 if len(buffer) > 8192:

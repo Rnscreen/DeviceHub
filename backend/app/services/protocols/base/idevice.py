@@ -103,7 +103,7 @@ class IDeviceProtocol:
             polldata = DataFrame(id=self.device_config.id, timestamp=now)
 
             # 1. 轮询info
-            if self._is_ready:
+            if self._is_ready and self.protocol_config.data.get(PollDataType.INFO,False):
                 polldata.info = await self.update_by_datatype(PollDataType.INFO)
                 self._last_poll_time.info = now
                 self._is_ready = False
@@ -144,12 +144,12 @@ class IDeviceProtocol:
     def _should_poll_slow(self) -> bool:
         """基于计数的轮询判断"""
         self._poll_counter[0] = (self._poll_counter[0] + 1) % self._poll_config.poll_slow
-        return self._poll_counter[0] == 1
+        return self._poll_counter[0] == 1 and bool(self.protocol_config.data.get(PollDataType.MONITOR_SLOW,False))
 
     def _should_poll_status(self) -> bool:
         """基于计数的轮询判断"""
         self._poll_counter[1] = (self._poll_counter[1] + 1) % self._poll_config.poll_status
-        return self._poll_counter[1] == 1
+        return self._poll_counter[1] == 1 and bool(self.protocol_config.data.get(PollDataType.STATUS,False))
 
     async def update_by_datatype(self, poll_data_type: PollDataType) -> DataTypeLayer:
         """更新指定数据类型的所有数据项

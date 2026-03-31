@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史数据查询</title>
+    <link rel="stylesheet" href="../css/all.min.css">
+    <link rel="stylesheet" href="../css/style.css">
+    <script src="../js/modules/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fa; color: #333; }
+
+        .page-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 24px; background: #fff; border-bottom: 2px solid #e1e5eb;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .page-header h1 { font-size: 1.4rem; color: #2c3e50; display: flex; align-items: center; gap: 10px; }
+        .page-header h1 i { color: #4a6cf7; }
+        .btn-back { padding: 8px 16px; border-radius: 6px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; }
+        .btn-back:hover { background: #f0f0f0; }
+
+        .page-body { display: flex; height: calc(100vh - 60px); }
+
+        .sidebar-panel {
+            width: 320px; min-width: 320px; background: #fff; border-right: 1px solid #e1e5eb;
+            display: flex; flex-direction: column; overflow-y: auto;
+        }
+        .sidebar-section { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; }
+        .sidebar-section:last-child { border-bottom: none; }
+        .section-title { font-size: 0.85rem; font-weight: 600; color: #7f8c8d; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+
+        .device-select, .field-select, .time-select {
+            width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #ddd;
+            font-size: 0.95rem; background: #fff; cursor: pointer; transition: border 0.3s;
+        }
+        .device-select:focus, .field-select:focus, .time-select:focus { border-color: #4a6cf7; outline: none; }
+
+        .channel-list { max-height: 200px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 4px; }
+        .channel-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            border-radius: 6px; cursor: pointer; transition: background 0.2s; font-size: 0.9rem;
+        }
+        .channel-item:hover { background: #f5f7fa; }
+        .channel-item input[type="checkbox"] { accent-color: #4a6cf7; width: 16px; height: 16px; cursor: pointer; }
+        .channel-item label { cursor: pointer; flex: 1; }
+
+        .time-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        .time-preset-btn {
+            padding: 8px 4px; border-radius: 6px; border: 1px solid #e0e0e0; background: #fff;
+            cursor: pointer; font-size: 0.8rem; text-align: center; transition: all 0.2s; color: #555;
+        }
+        .time-preset-btn:hover { border-color: #4a6cf7; color: #4a6cf7; background: #f0f4ff; }
+        .time-preset-btn.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+
+        .time-range-row { display: block; margin-top: 10px; }
+        .time-range-row input[type="datetime-local"] {
+            width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd;
+            font-size: 0.85rem; color: #555; box-sizing: border-box;
+        }
+        .time-range-row input[type="datetime-local"]:focus { border-color: #4a6cf7; outline: none; }
+        .time-range-row.time-label { text-align: center; padding: 4px 0; }
+        .time-range-row.time-label span { color: #999; font-size: 0.85rem; }
+
+        .btn-query {
+            width: 100%; padding: 12px; border-radius: 8px; border: none;
+            background: #4a6cf7; color: #fff; font-size: 1rem; font-weight: 600;
+            cursor: pointer; transition: background 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-query:hover { background: #3a5ce5; }
+        .btn-query:disabled { background: #b0b8d1; cursor: not-allowed; }
+
+        .btn-export {
+            width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd;
+            background: #fff; color: #555; font-size: 0.9rem; font-weight: 500;
+            cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px;
+        }
+        .btn-export:hover { border-color: #27ae60; color: #27ae60; background: #f0faf4; }
+        .btn-export:disabled { color: #ccc; border-color: #eee; cursor: not-allowed; }
+
+        .main-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        .chart-toolbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 20px; background: #fff; border-bottom: 1px solid #f0f0f0;
+        }
+        .chart-info { font-size: 0.9rem; color: #7f8c8d; }
+        .chart-info strong { color: #333; }
+
+        .chart-area { flex: 1; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
+        .chart-container { width: 100%; flex: 1; min-height: 300px; }
+        .other-data-panel {
+            width: 100%; min-height: 80px; max-height: 150px; overflow-y: auto;
+            background: #fff; border: 1px solid #e1e5eb; border-radius: 8px;
+            margin-top: 12px; padding: 12px; display: none;
+        }
+        .other-data-panel.show { display: block; }
+        .other-data-title { font-size: 0.85rem; font-weight: 600; color: #2c3e50; margin-bottom: 8px; }
+        .other-data-items { display: flex; flex-wrap: wrap; gap: 12px; }
+        .other-data-item {
+            background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;
+            padding: 6px 12px; font-size: 0.85rem;
+        }
+        .other-data-item .label { color: #666; margin-right: 6px; }
+        .other-data-item .value { color: #333; font-weight: 500; }
+
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100%; color: #bdc3c7;
+        }
+        .empty-state i { font-size: 4rem; margin-bottom: 16px; }
+        .empty-state h3 { font-size: 1.2rem; margin-bottom: 8px; color: #95a5a6; }
+        .empty-state p { font-size: 0.95rem; }
+
+        .loading-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8); display: flex; align-items: center;
+            justify-content: center; z-index: 50;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 3px solid #e0e0e0;
+            border-top-color: #4a6cf7; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .select-all-row { display: flex; gap: 8px; margin-bottom: 6px; }
+        .select-all-btn {
+            padding: 4px 10px; border-radius: 4px; border: 1px solid #ddd; background: #f9f9f9;
+            cursor: pointer; font-size: 0.78rem; color: #666;
+        }
+        .select-all-btn:hover { border-color: #4a6cf7; color: #4a6cf7; }
+
+        .data-type-group { margin-bottom: 12px; }
+        .data-type-label { font-size: 0.85rem; font-weight: 600; color: #2c3e50; margin-bottom: 6px; padding-left: 4px; }
+
+        @media (max-width: 900px) {
+            .page-body { flex-direction: column; height: auto; }
+            .sidebar-panel { width: 100%; min-width: auto; border-right: none; border-bottom: 1px solid #e1e5eb; max-height: 50vh; }
+            .chart-area { min-height: 400px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-header">
+        <h1><i class="fas fa-history"></i> 历史数据查询</h1>
+        <button class="btn-back" onclick="window.history.back()">
+            <i class="fas fa-arrow-left"></i> 返回
+        </button>
+    </div>
+
+    <div class="page-body">
+        <div class="sidebar-panel">
+            <div class="sidebar-section">
+                <div class="section-title"><i class="fas fa-microchip"></i> 设备选择</div>
+                <select class="device-select" id="deviceSelect">
+                    <option value="">加载中...</option>
+                </select>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title"><i class="fas fa-layer-group"></i> 数据点与通道</div>
+                <div id="fieldsContainer">
+                    <div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">请先选择设备</div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title"><i class="fas fa-clock"></i> 时间范围</div>
+                <div class="time-presets" id="timePresets">
+                    <button class="time-preset-btn" data-minutes="30">30分钟</button>
+                    <button class="time-preset-btn" data-minutes="60">1小时</button>
+                    <button class="time-preset-btn" data-minutes="360">6小时</button>
+                    <button class="time-preset-btn" data-minutes="1440">1天</button>
+                    <button class="time-preset-btn" data-minutes="10080">7天</button>
+                    <button class="time-preset-btn" data-minutes="43200">30天</button>
+                </div>
+                <div class="time-range-row">
+                    <input type="datetime-local" id="startTime">
+                </div>
+                <div class="time-range-row time-label">
+                    <span>至</span>
+                </div>
+                <div class="time-range-row">
+                    <input type="datetime-local" id="endTime">
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <button class="btn-query" id="queryBtn" disabled>
+                    <i class="fas fa-search"></i> 查询数据
+                </button>
+                <button class="btn-export" id="exportBtn" disabled>
+                    <i class="fas fa-file-csv"></i> 导出 CSV
+                </button>
+            </div>
+        </div>
+
+        <div class="main-panel">
+            <div class="chart-toolbar">
+                <div class="chart-info" id="chartInfo">请选择设备和数据点后查询</div>
+                <div id="recordCount" style="font-size: 0.85rem; color: #999;"></div>
+            </div>
+            <div class="chart-area" style="position: relative;">
+                <div class="empty-state" id="emptyState">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>暂无数据</h3>
+                    <p>选择设备、数据点和时间范围后点击查询</p>
+                </div>
+                <div class="chart-container" id="chartContainer" style="display: none;"></div>
+                <div class="other-data-panel" id="otherDataPanel">
+                    <div class="other-data-title"><i class="fas fa-tags"></i> 其他数据</div>
+                    <div class="other-data-items" id="otherDataItems"></div>
+                </div>
+                <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const API = `${window.location.protocol}//${window.location.host}/api/v1`;
+        let chartInstance = null;
+        let currentData = null;
+        let currentParams = {};
+        let fieldTypesMap = {};
+
+        const deviceSelect = document.getElementById('deviceSelect');
+        const fieldsContainer = document.getElementById('fieldsContainer');
+        const queryBtn = document.getElementById('queryBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const startTimeInput = document.getElementById('startTime');
+        const endTimeInput = document.getElementById('endTime');
+        const chartContainer = document.getElementById('chartContainer');
+        const otherDataPanel = document.getElementById('otherDataPanel');
+        const otherDataItems = document.getElementById('otherDataItems');
+        const emptyState = document.getElementById('emptyState');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const chartInfo = document.getElementById('chartInfo');
+        const recordCount = document.getElementById('recordCount');
+
+        async function apiGet(path) {
+            const resp = await fetch(`${API}${path}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.json();
+        }
+
+        async function loadDevices() {
+            try {
+                const data = await apiGet('/data/devices');
+                deviceSelect.innerHTML = '<option value="">-- 请选择设备 --</option>';
+                data.forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d.device_id;
+                    opt.textContent = d.name ? `${d.name} (${d.device_id})` : d.device_id;
+                    deviceSelect.appendChild(opt);
+                });
+            } catch (e) {
+                deviceSelect.innerHTML = '<option value="">加载失败</option>';
+                console.error('加载设备列表失败:', e);
+            }
+        }
+
+        async function onDeviceChange() {
+            const deviceId = deviceSelect.value;
+            fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">加载中...</div>';
+            queryBtn.disabled = true;
+            exportBtn.disabled = true;
+
+            if (!deviceId) {
+                fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">请先选择设备</div>';
+                return;
+            }
+
+            try {
+                const [fieldsResp, timeRangeResp] = await Promise.all([
+                    apiGet(`/data/${encodeURIComponent(deviceId)}/fields`),
+                    apiGet(`/data/${encodeURIComponent(deviceId)}/time-range`)
+                ]);
+
+                const fields = fieldsResp.fields || [];
+                const timeRange = timeRangeResp;
+
+                fieldTypesMap = {};
+                fields.forEach(f => {
+                    const dataType = f.data_type || 'String';
+                    f.channels.forEach(ch => {
+                        fieldTypesMap[`${f.data_name}.${ch}`] = dataType;
+                    });
+                });
+
+                renderFields(fields);
+                queryBtn.disabled = fields.length === 0;
+
+                if (timeRange.start_time) {
+                    startTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
+                    endTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
+                    startTimeInput.min = toLocalDatetimeString(timeRange.start_time);
+                    endTimeInput.min = toLocalDatetimeString(timeRange.start_time);
+                }
+            } catch (e) {
+                fieldsContainer.innerHTML = '<div style="color: #e74c3c; text-align: center; padding: 20px; font-size: 0.9rem;">加载失败</div>';
+                console.error('加载字段失败:', e);
+            }
+        }
+
+        function renderFields(fields) {
+            if (!fields || fields.length === 0) {
+                fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">该设备暂无历史数据</div>';
+                return;
+            }
+
+            let html = '<div class="select-all-row">';
+            html += '<button class="select-all-btn" id="selectAllBtn">全选</button>';
+            html += '<button class="select-all-btn" id="deselectAllBtn">取消全选</button>';
+            html += '</div>';
+
+            fields.forEach(f => {
+                html += '<div class="data-type-group">';
+                html += `<div class="data-type-label">${escapeHtml(f.data_name)}</div>`;
+                html += '<div class="channel-list">';
+                f.channels.forEach(ch => {
+                    const fieldKey = `${f.data_name}.${ch}`;
+                    html += `<div class="channel-item">`;
+                    html += `<input type="checkbox" id="ch_${escapeAttr(fieldKey)}" value="${escapeAttr(fieldKey)}">`;
+                    html += `<label for="ch_${escapeAttr(fieldKey)}">${escapeHtml(ch)}</label>`;
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            });
+
+            fieldsContainer.innerHTML = html;
+
+            document.getElementById('selectAllBtn').addEventListener('click', () => {
+                fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+            });
+            document.getElementById('deselectAllBtn').addEventListener('click', () => {
+                fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+            });
+        }
+
+        function getSelectedFields() {
+            const checked = fieldsContainer.querySelectorAll('input[type="checkbox"]:checked');
+            return Array.from(checked).map(cb => cb.value);
+        }
+
+        function setTimeRangeFromPreset(minutes) {
+            const end = new Date();
+            const start = new Date(end.getTime() - minutes * 60 * 1000);
+            startTimeInput.value = toLocalDatetimeString(start.toISOString());
+            endTimeInput.value = toLocalDatetimeString(end.toISOString());
+
+            document.querySelectorAll('.time-preset-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.minutes) === minutes);
+            });
+        }
+
+        document.querySelectorAll('.time-preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const minutes = parseInt(btn.dataset.minutes);
+                setTimeRangeFromPreset(minutes);
+            });
+        });
+
+        startTimeInput.addEventListener('change', () => {
+            document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+        });
+        endTimeInput.addEventListener('change', () => {
+            document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+        });
+
+        queryBtn.addEventListener('click', async () => {
+            const deviceId = deviceSelect.value;
+            const fields = getSelectedFields();
+            const start = startTimeInput.value;
+            const end = endTimeInput.value;
+
+            if (!deviceId || !start || !end) return;
+            if (fields.length === 0) {
+                alert('请至少选择一个数据通道');
+                return;
+            }
+
+            currentParams = {
+                device_id: deviceId,
+                fields: fields.join(','),
+                start: new Date(start).toISOString(),
+                end: new Date(end).toISOString()
+            };
+
+            loadingOverlay.style.display = 'flex';
+            emptyState.style.display = 'none';
+            chartContainer.style.display = 'none';
+
+            try {
+                const params = new URLSearchParams({
+                    fields: currentParams.fields,
+                    start: currentParams.start,
+                    end: currentParams.end
+                });
+                const data = await apiGet(`/data/${encodeURIComponent(deviceId)}?${params}`);
+                currentData = data;
+
+                if (!data.data || data.data.length === 0) {
+                    emptyState.style.display = 'flex';
+                    emptyState.querySelector('h3').textContent = '未查询到数据';
+                    emptyState.querySelector('p').textContent = '请调整时间范围或数据点后重试';
+                    chartInfo.textContent = '未查询到数据';
+                    recordCount.textContent = '';
+                    exportBtn.disabled = true;
+                } else {
+                    renderChart(data);
+                    exportBtn.disabled = false;
+                    const deviceName = deviceSelect.options[deviceSelect.selectedIndex].textContent;
+                    chartInfo.innerHTML = `<strong>${escapeHtml(deviceName)}</strong> | ${escapeHtml(currentParams.fields)} | ${data.count} 条记录`;
+                    recordCount.textContent = `${data.data.length} 数据点`;
+                }
+            } catch (e) {
+                emptyState.style.display = 'flex';
+                emptyState.querySelector('h3').textContent = '查询失败';
+                emptyState.querySelector('p').textContent = e.message;
+                chartInfo.textContent = '查询出错';
+                console.error('查询失败:', e);
+            } finally {
+                loadingOverlay.style.display = 'none';
+            }
+        });
+
+        function renderChart(data) {
+            emptyState.style.display = 'none';
+            chartContainer.style.display = 'block';
+
+            if (!chartInstance) {
+                chartInstance = echarts.init(chartContainer);
+            }
+
+            const numericSeriesMap = {};
+            const nonNumericDataMap = {};
+            const allKeys = [];
+
+            data.data.forEach(record => {
+                const key = `${record.data_name}.${record.channel}`;
+                if (!allKeys.includes(key)) {
+                    allKeys.push(key);
+                }
+                const fieldType = fieldTypesMap[key] || 'String';
+                const isNumeric = fieldType === 'Integer' || fieldType === 'Float';
+
+                if (isNumeric) {
+                    if (!numericSeriesMap[key]) {
+                        numericSeriesMap[key] = [];
+                    }
+                    numericSeriesMap[key].push([record.time, record.value]);
+                } else {
+                    if (!nonNumericDataMap[key]) {
+                        nonNumericDataMap[key] = [];
+                    }
+                    nonNumericDataMap[key].push({ time: record.time, value: record.value });
+                }
+            });
+
+            const series = [];
+            const legendData = [];
+            const colorPalette = [
+                '#4a6cf7', '#e74c3c', '#27ae60', '#f39c12', '#9b59b6',
+                '#1abc9c', '#e67e22', '#3498db', '#e91e63', '#00bcd4',
+                '#8bc34a', '#ff5722', '#607d8b', '#795548', '#cddc39'
+            ];
+
+            let colorIdx = 0;
+            Object.entries(numericSeriesMap).forEach(([key, points]) => {
+                const color = colorPalette[colorIdx % colorPalette.length];
+                series.push({
+                    name: key,
+                    type: 'line',
+                    data: points,
+                    showSymbol: false,
+                    smooth: false,
+                    lineStyle: { width: 1.5, color: color },
+                    itemStyle: { color: color },
+                    emphasis: { lineStyle: { width: 2.5 } }
+                });
+                legendData.push(key);
+                colorIdx++;
+            });
+
+            Object.keys(nonNumericDataMap).forEach(key => {
+                nonNumericDataMap[key].sort((a, b) => new Date(a.time) - new Date(b.time));
+            });
+
+            const hasNonNumeric = Object.keys(nonNumericDataMap).length > 0;
+            if (hasNonNumeric) {
+                otherDataPanel.classList.add('show');
+                const nonNumericKeys = Object.keys(nonNumericDataMap);
+                otherDataItems.innerHTML = nonNumericKeys.map(key => {
+                    return `<div class="other-data-item"><span class="label">${escapeHtml(key)}:</span><span class="value" id="value_${escapeAttr(key)}">-</span></div>`;
+                }).join('');
+            } else {
+                otherDataPanel.classList.remove('show');
+            }
+
+            const option = {
+                animation: false,
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'cross' },
+                    formatter: function(params) {
+                        let html = `<div style="font-size:12px;margin-bottom:4px;color:#666">${params[0].axisValue}</div>`;
+                        params.forEach(p => {
+                            html += `<div style="margin:2px 0">${p.marker} ${p.seriesName}: <strong>${p.value[1]}</strong></div>`;
+                        });
+                        return html;
+                    }
+                },
+                legend: {
+                    data: legendData,
+                    top: 10,
+                    type: 'scroll',
+                    textStyle: { fontSize: 12 }
+                },
+                grid: {
+                    left: '3%', right: '4%', top: hasNonNumeric ? '15%' : '15%', bottom: '15%',
+                    containLabel: true
+                },
+                dataZoom: [
+                    { type: 'inside', start: 0, end: 100 },
+                    { type: 'slider', show: true, start: 0, end: 100, height: 24, bottom: 10 }
+                ],
+                xAxis: {
+                    type: 'time',
+                    axisLabel: {
+                        formatter: function(val) {
+                            const d = new Date(val);
+                            return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+                        }
+                    },
+                    splitLine: { show: true, lineStyle: { type: 'dashed', color: '#f0f0f0' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: {
+                        formatter: function(val) {
+                            if (Math.abs(val) < 1 && val !== 0) {
+                                let n = 0, v = val;
+                                while (Math.abs(v) < 1) { v *= 10; n++; }
+                                return v.toFixed(1) + 'e-' + n;
+                            } else if (Math.abs(val) >= 10000) {
+                                let n = 0, v = val;
+                                while (Math.abs(v) >= 10) { v /= 10; n++; }
+                                return v.toFixed(1) + 'e' + n;
+                            }
+                            return val;
+                        }
+                    }
+                },
+                series: series
+            };
+
+            chartInstance.setOption(option, true);
+
+            chartInstance.off('updateAxisPointer');
+            chartInstance.on('updateAxisPointer', function(event) {
+                const xAxisInfo = event.axesInfo[0];
+                if (xAxisInfo) {
+                    const currentTime = xAxisInfo.value;
+                    updateNonNumericData(currentTime, nonNumericDataMap);
+                }
+            });
+
+            function updateNonNumericData(currentTime, nonNumericDataMap) {
+                const currentDate = new Date(currentTime);
+                Object.keys(nonNumericDataMap).forEach(key => {
+                    const dataList = nonNumericDataMap[key];
+                    let lastValue = null;
+                    for (let i = 0; i < dataList.length; i++) {
+                        const dataTime = new Date(dataList[i].time);
+                        if (dataTime <= currentDate) {
+                            lastValue = dataList[i].value;
+                        } else {
+                            break;
+                        }
+                    }
+                    const valueEl = document.getElementById(`value_${key}`);
+                    if (valueEl) {
+                        valueEl.textContent = lastValue !== null ? escapeHtml(String(lastValue)) : '-';
+                    }
+                });
+            }
+
+            let resizeTimer;
+            const resizeHandler = () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => chartInstance.resize(), 200);
+            };
+            window.addEventListener('resize', resizeHandler);
+            setTimeout(() => chartInstance.resize(), 100);
+        }
+
+        exportBtn.addEventListener('click', () => {
+            if (!currentParams.device_id) return;
+            const params = new URLSearchParams({
+                format: 'csv',
+                fields: currentParams.fields,
+                start: currentParams.start,
+                end: currentParams.end
+            });
+            const url = `${API}/data/${encodeURIComponent(currentParams.device_id)}/export?${params}`;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+
+        deviceSelect.addEventListener('change', onDeviceChange);
+
+        function toLocalDatetimeString(isoStr) {
+            const d = new Date(isoStr);
+            const pad = n => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        loadDevices();
+    })();
+    </script>
+</body>
+</html>

@@ -92,8 +92,12 @@ class AsciiCommandBuilder(ICommandBuilder):
             except ValueError:
                 self.logger.warning(f"No command template for {data_name}, skipping")
                 continue
-                        
-            if isinstance(channels, str):
+            
+            if 'all' in cmd_key:
+                formatted_cmd = self._format_command(cmd_template, channel='main')
+                commands.append(formatted_cmd)
+                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{data_name}")
+            elif isinstance(channels, str):
                 formatted_cmd = self._format_command(cmd_template, channel=channels)
                 commands.append(formatted_cmd)
                 cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{data_name}")
@@ -152,7 +156,11 @@ class AsciiCommandBuilder(ICommandBuilder):
             
             formatted_value = self._format_control_value(ctrl_def, value)
             
-            if isinstance(channels, str):
+            if 'all' in cmd_key:
+                formatted_cmd = self._format_command(cmd_template, channel='main')
+                commands.append(formatted_cmd)
+                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{control_name}")
+            elif isinstance(channels, str):
                 formatted_cmd = self._format_command(
                     cmd_template, 
                     channel=channels, 

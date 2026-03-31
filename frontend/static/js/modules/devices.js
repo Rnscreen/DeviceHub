@@ -3,15 +3,14 @@ import { Utils } from './utils.js';
 
 // 设备管理模块
 export class DeviceManager {
-    constructor(uiManager, chartManager, wsManager, apiHost = 'http://localhost:8000') {
+    constructor(uiManager, chartManager, apiHost = 'localhost:8000') {
         this.uiManager = uiManager;
         this.chartManager = chartManager
-        this.wsManager = wsManager
         this.devices = {};
         this.deviceConfigs = {};
         this.currentDeviceId = null;
         this.deviceFunctions = new Map();
-        this.apiHost = apiHost.replace(/\/$/, '');
+        this.apiHost = 'http://' + apiHost.replace(/\/$/, '');
     }
 
     /**

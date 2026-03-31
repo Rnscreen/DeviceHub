@@ -1,6 +1,21 @@
 # CHANGELOG
 <!--  -->
-## V0.1.0 beta
+
+## V0.1.1
+Date: 2026-03-31
+### Added:
+1. 新增了历史数据查询接口及前端页面:
+   Frontend: 新增了history.html, 用于查看储存于SQLite3数据库中的历史数据
+   默认路径: localhost:8000/static/page/history.html
+### Fixed:
+1. FastAPI: 修复了历史数据查询接口, 用于前端调用
+2. SQList3: 针对新增功能, 修改了数据库结构
+3. 修复了部分TCP协议的解析问题
+4. Frontend: 将字体、echart.min.js、all.min.css下载到了static目录, 不再从CDN引入
+### Other:
+1. 修改了README.md, 之前的版本是AI生成的, 看了下有点浮夸, 改掉了qwq
+
+## V0.1.0
 Date: 2026-03-05
 ### Rebuilt:
 1. 重新设计了项目结构

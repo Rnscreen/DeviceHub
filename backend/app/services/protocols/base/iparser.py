@@ -1,4 +1,4 @@
-from typing import Sequence, Union
+from typing import Sequence
 import logging
 from typing import Any, Optional
 from abc import ABC, abstractmethod
@@ -15,10 +15,8 @@ class IResponseParser(ABC):
     
     @abstractmethod
     def parse_poll_response(self, 
-                          origin_responses: Sequence[tuple[str, str]]
-                          )-> list[tuple[str,
-                            Union[dict[str, Any],
-                                  int,float,str,None]]]:
+                          origin_responses: Sequence[tuple[str, Any]]
+                          )-> list[tuple[str,Any]]:
         """解析轮询响应 - 支持批量解析
         
         Args:
@@ -34,7 +32,7 @@ class IResponseParser(ABC):
 
     @abstractmethod
     def parse_control_response(self,
-                             origin_responses: Sequence[tuple[str, str]]) -> tuple[Sequence[Any],list[str]]:
+                             origin_responses: Sequence[tuple[str, Any]]) -> tuple[Sequence[Any],list[str]]:
         """解析控制响应, 批量解析
         
         Args:
@@ -102,7 +100,6 @@ class IResponseParser(ABC):
     def _parse_transform(self, vars: list[Any], params: dict[str, Any]) -> list[Any]:
         """值转换解析"""
         # 实现安全的表达式求值
-        # 这里可以集成你提到的transform步骤逻辑
         return vars
 
     def _extract_result(self, vars: list[Any], parse_config: dict[str, Any]) -> Any:

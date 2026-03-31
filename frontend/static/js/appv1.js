@@ -7,11 +7,12 @@ import { ChartManager } from './modules/charts.js';
 // 主应用类
 class IndustrialMonitorApp {
     constructor() {
+        const apiHost= window.location.host;
         this.chartManager = new ChartManager();
         this.uiManager = new UIManager();
-        this.deviceManager = new DeviceManager(this.uiManager, this.chartManager);
-        this.wsManager = new WsManager(this.deviceManager);
-        this.controlManager = new ControlManager(this.uiManager,this.deviceManager,this.wsManager);
+        this.deviceManager = new DeviceManager(this.uiManager, this.chartManager, apiHost);
+        this.wsManager = new WsManager(this.deviceManager,apiHost);
+        this.controlManager = new ControlManager(this.uiManager,this.deviceManager,this.wsManager,  apiHost);
 
         this.initializeApp();
     }

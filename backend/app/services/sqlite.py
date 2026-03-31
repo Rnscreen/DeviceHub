@@ -12,8 +12,14 @@ logger = logging.getLogger(__name__)
 
 class SQLiteService:
     def __init__(self, db_dir: str = "data"):
-        self.db_dir: str = f"../{db_dir}"
-        os.makedirs(db_dir, exist_ok=True)
+        # 判断是否是绝对路径
+        if not os.path.isabs(db_dir):
+            # 数据库目录，获取项目绝对路径, 当前 proj/backend/app/services/sqlite.py
+            self.project_dir: str = f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/../../"
+            self.db_dir: str = f"{self.project_dir}/{db_dir}"
+        else:
+            self.db_dir: str = db_dir
+        os.makedirs(self.db_dir, exist_ok=True)
         self.conn_cache: Dict[str, sqlite3.Connection] = {}
         
     def _get_db_path(self, timestamp: Optional[datetime] = None) -> str:
@@ -47,6 +53,7 @@ class SQLiteService:
                 device_id VARCHAR(50),
                 data_name VARCHAR(50),
                 channel VARCHAR(50),
+                data_type VARCHAR(20),
                 start_time TIMESTAMP,
                 end_time TIMESTAMP,
                 record_count INTEGER DEFAULT 0,
@@ -96,7 +103,7 @@ class SQLiteService:
 
         cursor = conn.cursor()
         try:
-            for data_name in [DataType.MONITOR, DataType.STATUS, DataType.CONTROLS, DataType.INFO]:
+            for data_name in [DataType.MONITOR, DataType.STATUS, DataType.INFO]:
                 layer:DataTypeLayer = data_frame[data_name]
                 categories:dict[str, DataCategory] = layer.get_categoris()
                 
@@ -111,7 +118,7 @@ class SQLiteService:
                             continue
                         
                         cursor.execute('''
-                            SELECT index_id, end_time, record_count FROM data_index 
+                            SELECT index_id, end_time, record_count, data_type FROM data_index 
                             WHERE device_id = ? AND data_name = ? AND channel = ?
                         ''', (device_id, category_name, channel))
                         
@@ -125,11 +132,12 @@ class SQLiteService:
                                 WHERE index_id = ?
                             ''', (timestamp.isoformat(), index_id))
                         else:
+                            data_type = self._infer_data_type(value)
                             cursor.execute('''
                                 INSERT INTO data_index 
-                                (device_id, data_name, channel, start_time, end_time, record_count) 
-                                VALUES (?, ?, ?, ?, ?, 1)
-                            ''', (device_id, category_name, channel, 
+                                (device_id, data_name, channel, data_type, start_time, end_time, record_count) 
+                                VALUES (?, ?, ?, ?, ?, ?, 1)
+                            ''', (device_id, category_name, channel, data_type,
                                 timestamp.isoformat(), timestamp.isoformat()))
                             index_id = cursor.lastrowid
 
@@ -193,7 +201,7 @@ class SQLiteService:
                 cursor.execute(index_query, index_params)
                 
                 for row in cursor:
-                    db_path = Path(db_conn.execute("PRAGMA database_list").fetchone()[2]).parent
+                    db_path = Path(db_conn.execute("PRAGMA database_list").fetchone()[2])
                     if db_path.exists():
                         target_files.add(str(db_path))
                 
@@ -304,6 +312,101 @@ class SQLiteService:
         else:
             return parts[0], parts[1]
     
+    def _infer_data_type(self, value: Any) -> str:
+        """根据值推断数据类型"""
+        if value is None:
+            return "Unknown"
+        if type(value) is bool:
+            return "Boolean"
+        if type(value) is int:
+            return "Integer"
+        if type(value) is float:
+            return "Float"
+        if type(value) is str:
+            return "String"
+        return "Unknown"
+    
+    def get_all_device_ids(self) -> List[str]:
+        """获取所有有历史数据的设备ID"""
+        device_ids: Set[str] = set()
+        self._scan_db_files()
+        for db_conn in self.conn_cache.values():
+            try:
+                cursor = db_conn.cursor()
+                cursor.execute('SELECT DISTINCT device_id FROM data_index')
+                for row in cursor:
+                    device_ids.add(row[0])
+                cursor.close()
+            except Exception as e:
+                logger.warning(f"获取设备ID列表失败: {e}")
+        return sorted(device_ids)
+
+    def get_device_fields(self, device_id: str) -> List[Dict[str, Any]]:
+        """获取设备可用的数据类型和通道列表"""
+        fields_map: Dict[str, Dict[str, Set[str]]] = {}
+        self._scan_db_files()
+        for db_conn in self.conn_cache.values():
+            try:
+                cursor = db_conn.cursor()
+                cursor.execute(
+                    'SELECT DISTINCT data_name, data_type, channel FROM data_index WHERE device_id = ?',
+                    (device_id,)
+                )
+                for row in cursor:
+                    data_name, data_type, channel = row[0], row[1], row[2]
+                    if data_name not in fields_map:
+                        fields_map[data_name] = {"data_type": data_type, "channels": set()}
+                    if channel:
+                        fields_map[data_name]["channels"].add(channel)
+                cursor.close()
+            except Exception as e:
+                logger.warning(f"获取设备字段列表失败: {e}")
+        result: List[Dict[str, Any]] = []
+        for data_name in sorted(fields_map.keys()):
+            result.append({
+                "data_name": data_name,
+                "data_type": fields_map[data_name]["data_type"],
+                "channels": sorted(fields_map[data_name]["channels"])
+            })
+        return result
+
+    def get_device_time_range(self, device_id: str) -> Dict[str, Optional[str]]:
+        """获取设备数据的时间范围"""
+        min_time = None
+        max_time = None
+        self._scan_db_files()
+        for db_conn in self.conn_cache.values():
+            try:
+                cursor = db_conn.cursor()
+                cursor.execute(
+                    'SELECT MIN(start_time), MAX(end_time) FROM data_index WHERE device_id = ?',
+                    (device_id,)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    if min_time is None or row[0] < min_time:
+                        min_time = row[0]
+                if row and row[1]:
+                    if max_time is None or row[1] > max_time:
+                        max_time = row[1]
+                cursor.close()
+            except Exception as e:
+                logger.warning(f"获取设备时间范围失败: {e}")
+        return {"start_time": min_time, "end_time": max_time}
+
+    def _scan_db_files(self) -> None:
+        """扫描数据目录中所有数据库文件并建立连接"""
+        data_path = Path(self.db_dir)
+        if not data_path.exists():
+            return
+        for year_dir in data_path.iterdir():
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
+                continue
+            for db_file in year_dir.glob("data_*.db"):
+                db_path = str(db_file)
+                if db_path not in self.conn_cache:
+                    self._get_conn(db_path)
+
     def optimize_indexes(self)->None:
         """优化索引表，清理无效记录"""
         for db_conn in self.conn_cache.values():

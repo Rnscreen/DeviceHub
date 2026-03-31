@@ -33,12 +33,10 @@ class PollDataType(str, Enum):
     STATUS = "status"
     INFO = "info"
     STREAM = "stream"
-    CONTROLS = "controls"
 
     @property    
     def dt(self) -> DataType:
         """获取对应的数据类型"""
-
         return DataType[self.name]
 
 # 基础模型
@@ -50,7 +48,6 @@ class ModbusRegister(BaseModel):
     type: Literal["int16", "uint16", "int32", "uint32", "float", "double", "hex", "str"] = "int16"
     order: Literal["big", "little"] = "big"
     factor: float = 1.0
-
 
 class ModbusChannel(dict[str, ModbusRegister]):
     """Modbus模式通道 - 寄存器配置"""
@@ -79,6 +76,23 @@ class ChannelConfig(dict[str,Channel]):
 
 EnumDefinition = dict[str,str]
 Enums = dict[str,EnumDefinition]
+class EnumKey(str):
+    """枚举键"""
+    def build(self, ori_value: str, enums:Enums={}):
+        if ori_value.startswith("enum."):
+            split = ori_value.split(".")
+            if len(split) != 3:
+                raise ValueError(f"枚举键{ori_value}格式错误")
+            _, group_name, key = split
+            if group_name not in enums:
+                raise ValueError(f"枚举组{group_name}不存在")
+            if key not in enums[group_name]:
+                raise ValueError(f"枚举键{key}不存在")
+            self = enums[group_name][key]
+            return self
+        else:
+            raise ValueError(f"枚举键{ori_value}格式错误")
+
 
 # 数据定义
 class DataDefinition(BaseModel):
@@ -86,7 +100,7 @@ class DataDefinition(BaseModel):
     description: str
     channel_group: str = "main"
     channel: Optional[str] = Field(default=None, validation_alias="channel")
-    type: Literal["int", "float", "str", None] = "float"
+    type: Literal["int", "float", "str", "bool", None] = "str"
     max: Optional[float] = None
     min: Optional[float] = None
 
@@ -117,6 +131,7 @@ class ControlDefinition(DataDefinition):
     max: Optional[float] = None
     min: Optional[float] = None
     enum: Optional[str] = None  # 枚举名，引用protocol.enums中的枚举
+    type: Literal["int", "float", "str", "bool", None] = "float"
 
     @model_validator(mode="after")
     def validate_type_enum(self) -> "ControlDefinition":

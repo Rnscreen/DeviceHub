@@ -1,12 +1,10 @@
-from typing import Callable, Optional, Union, Any
-import struct
+from typing import Optional, Any, Sequence, Union
 import logging
-from ....models import ProtocolConfig, ProtocolType, PollDataType
-from ....services.protocols.base.ibuilder import ICommandBuilder
+import struct
+from ....models import ProtocolConfig, ProtocolType, ModbusRegister
+from ..base.ibuilder import ICommandBuilder
 
 class ModbusCommandBuilder(ICommandBuilder):
-    """Modbus命令构建器 - 深度预编译优化"""
-    
     def __init__(
         self,
         protocol_config: ProtocolConfig,
@@ -15,306 +13,245 @@ class ModbusCommandBuilder(ICommandBuilder):
         super().__init__(protocol_config=protocol_config, address=address)
         self.logger = logging.getLogger(f"ModbusCommandBuilder.{protocol_config.name}")
         
-        # 深度预编译缓存
-        self._register_cache: dict[str, dict[str, Any]] = {}
-        self._frame_cache: dict[str, bytes] = {}
-        self._converter_cache: dict[str, Callable[...,Any]] = {}
-        self._precompile()
+        self._transaction_id = 0
         self._validate_protocol_type()
 
-    def _precompile(self):
-        """深度预编译Modbus命令"""
-        # 预编译所有监控命令的寄存器信息
-        for data_type, data_items in self.protocol_config.data.items(): #type:ignore
-            for data_name, data_def in data_items.items():
-                channel_group = data_def.channel
-                
-                # 获取通道组的寄存器配置
-                channel_config = self._get_channel_config(channel_group)
-                
-                # 预计算寄存器映射
-                register_info = self._precompile_registers(
-                    data_name, channel_group, channel_config
-                )
-                self._register_cache[f"monitor_{data_name}"] = register_info
-                
-                # 预构建Modbus请求帧
-                self._frame_cache[f"monitor_{data_name}"] = self._build_read_frame(
-                    register_info
-                )
-                
-                # 预编译数据转换器
-                self._converter_cache[f"monitor_{data_name}"] = self._build_converter(
-                    channel_config
-                )
-        
-        # 预编译所有控制命令
-        for ctrl_name, ctrl_def in self.protocol_config.controls.items():
-            channel_group = ctrl_def.channel
-            channel_config = self._get_channel_config(channel_group)
-            
-            register_info = self._precompile_registers(
-                ctrl_name, channel_group, channel_config
-            )
-            self._register_cache[f"control_{ctrl_name}"] = register_info
-            
-            self._converter_cache[f"control_{ctrl_name}"] = self._build_converter(
-                channel_config
+    def _validate_protocol_type(self):
+        if self.protocol_config.protocol_type != ProtocolType.MODBUS_TCP and \
+           self.protocol_config.protocol_type != ProtocolType.MODBUS_RTU:
+            raise ValueError(
+                f"Invalid protocol type: {self.protocol_config.protocol_type}, expected modbus_tcp or modbus_rtu"
             )
 
-    def _get_channel_config(self, channel_group: str) -> dict[str, Any]:
-        """获取通道配置"""
-        channels = self.protocol_config.channels.get(channel_group)
-        if not channels:
+    def _get_next_transaction_id(self) -> int:
+        """获取下一个事务ID"""
+        self._transaction_id = (self._transaction_id + 1) % 65536
+        return self._transaction_id
+
+    def _get_unit_id(self) -> int:
+        """获取Modbus从站地址"""
+        try:
+            return int(self.address) if self.address else 1
+        except (ValueError, TypeError):
+            self.logger.warning(f"Invalid address {self.address}, using default 1")
+            return 1
+
+    def _build_modbus_header(self, length: int, unit_id: int) -> bytes:
+        """构建Modbus TCP头部"""
+        transaction_id = self._get_next_transaction_id()
+        protocol_id = 0
+        
+        return struct.pack('>HHHB', transaction_id, protocol_id, length, unit_id)
+
+    def _get_register_config(self, data_name: str, channel: str) -> ModbusRegister:
+        """获取寄存器配置"""
+        data_def = self._get_data_definition(data_name)
+        channel_group = data_def.channel_group
+        
+        if channel_group not in self.channels:
             raise ValueError(f"Channel group {channel_group} not found")
         
-        if isinstance(channels, str):
-            return {"type": "str", "address": 0, "size": 1, "factor": 1.0}
+        channel_config = self.channels[channel_group]
         
-        if isinstance(channels, dict):
-            return channels
-        
-        raise ValueError(f"Invalid channel config for {channel_group}")
+        if isinstance(channel_config, dict):
+            if channel not in channel_config:
+                raise ValueError(f"Channel {channel} not found in group {channel_group}")
+            return channel_config[channel]
+        else:
+            raise ValueError(f"Channel group {channel_group} is not a ModbusChannel")
 
-    def _precompile_registers(
-        self,
-        name: str,
-        channel_group: str,
-        channel_config: dict[str, Any]
-    ) -> dict[str, Any]:
-        """预编译寄存器信息"""
-        return {
-            "name": name,
-            "channel_group": channel_group,
-            "address": channel_config.get("address", 0),
-            "size": channel_config.get("size", 2),
-            "data_type": channel_config.get("type", "int16"),
-            "order": channel_config.get("order", "big"),
-            "factor": channel_config.get("factor", 1.0)
+    def _merge_continuous_registers(self, register_configs: list[tuple[str, str, ModbusRegister]]) -> list[dict[str, Any]]:
+        """合并连续地址的寄存器以减少请求次数
+        
+        Returns:
+            合并后的寄存器请求列表
+        """
+        if not register_configs:
+            return []
+        
+        merged: list[dict[str, Any]] = []
+        current_group: dict[str, Any] = {
+            'data_name': register_configs[0][0],
+            'channels': [register_configs[0][1]],
+            'register_configs': [register_configs[0][2]],
+            'start_address': register_configs[0][2].address,
+            'register_count': register_configs[0][2].size // 2
         }
-
-    def _build_read_frame(self, register_info: dict[str, Any]) -> bytes:
-        """预构建Modbus读请求帧"""
-        address = register_info["address"]
-        size = register_info["size"]
         
-        # 构建Modbus读保持寄存器请求（功能码0x03）
-        # 格式: 设备地址(1) + 功能码(1) + 起始地址(2) + 寄存器数量(2) + CRC(2)
-        device_addr = int(self.address) if self.address else 1
+        for data_name, channel, reg_config in register_configs[1:]:
+            expected_address = current_group['start_address'] + current_group['register_count']
+            
+            if reg_config.address == expected_address and reg_config.type == current_group['register_configs'][0].type:
+                current_group['channels'].append(channel)
+                current_group['register_configs'].append(reg_config)
+                current_group['register_count'] += reg_config.size // 2
+            else:
+                merged.append(current_group)
+                current_group = {
+                    'data_name': data_name,
+                    'channels': [channel],
+                    'register_configs': [reg_config],
+                    'start_address': reg_config.address,
+                    'register_count': reg_config.size // 2
+                }
+        
+        merged.append(current_group)
+        return merged
+
+    def _build_read_request(self, start_address: int, register_count: int, unit_id: int) -> bytes:
+        """构建读取请求帧（功能码03或04）"""
         function_code = 0x03
         
-        frame = struct.pack(
-            ">BBHH",
-            device_addr,
-            function_code,
-            address,
-            size
-        )
+        pdu = struct.pack('>BHH', function_code, start_address, register_count)
+        length = len(pdu)
+        mbap = self._build_modbus_header(length, unit_id)
         
-        # 添加CRC校验
-        crc = self._calculate_crc(frame)
-        return frame + struct.pack("<H", crc)
+        return mbap + pdu
 
-    def _build_converter(self, channel_config: dict[str, Any]) -> Callable[[bytes], Union[float, int, str,None]]:
-        """预构建数据转换器"""
-        data_type = channel_config.get("type", "int16")
-        order = channel_config.get("order", "big")
-        factor = channel_config.get("factor", 1.0)
+    def _build_write_single_request(self, address: int, value: int, unit_id: int) -> bytes:
+        """构建单个寄存器写入请求帧（功能码06）"""
+        function_code = 0x06
         
-        def converter(raw_data: bytes) -> Union[float, int, str,None]:
-            try:
-                match data_type:
-                    case "str":
-                        value = raw_data.decode("ascii", errors="ignore").strip()
-                        return value if value else None
-                    case "hex":
-                        value = hex(int(raw_data.hex())*factor)
-                        return value
-                    case "int16":
-                        value = struct.unpack(f">{order}h", raw_data)[0]
-                    case "uint16":
-                        value = struct.unpack(f">{order}H", raw_data)[0]
-                    case "int32":
-                        value = struct.unpack(f">{order}i", raw_data)[0]
-                    case "uint32":
-                        value = struct.unpack(f">{order}I", raw_data)[0]
-                    case "float":
-                        value = struct.unpack(f">{order}f", raw_data)[0]
-                    case "double":
-                        value = struct.unpack(f">{order}d", raw_data)[0]
-                        return value * factor if factor != 1.0 else value
-                    case _:
-                        value = raw_data
-                        return str(raw_data)
-                    
-            except Exception as e:
-                self.logger.error(f"Data conversion failed: {e}")
-                return None
+        pdu = struct.pack('>BHH', function_code, address, value)
+        length = len(pdu)
+        mbap = self._build_modbus_header(length, unit_id)
         
-        return converter
+        return mbap + pdu
 
-    def _calculate_crc(self, data: bytes) -> int:
-        """计算Modbus CRC16校验"""
-        crc = 0xFFFF
-        for byte in data:
-            crc ^= byte
-            for _ in range(8):
-                if crc & 0x0001:
-                    crc = (crc >> 1) ^ 0xA001
+    def _build_write_multiple_request(self, start_address: int, values: list[int], unit_id: int) -> bytes:
+        """构建多个寄存器写入请求帧（功能码16）"""
+        function_code = 0x10
+        register_count = len(values)
+        byte_count = register_count * 2
+        
+        values_bytes = b''
+        for value in values:
+            values_bytes += struct.pack('>H', value)
+        
+        pdu = struct.pack('>BHHB', function_code, start_address, register_count, byte_count) + values_bytes
+        length = len(pdu)
+        mbap = self._build_modbus_header(length, unit_id)
+        
+        return mbap + pdu
+
+    def _value_to_register_value(self, value: Union[float, int, str, bool], reg_config: ModbusRegister) -> int:
+        """将值转换为寄存器值（应用缩放因子的逆运算）"""
+        try:
+            if isinstance(value, bool):
+                return 1 if value else 0
+            elif isinstance(value, str):
+                if reg_config.type == 'str':
+                    return int.from_bytes(value.encode('ascii')[:reg_config.size], 'big')
                 else:
-                    crc >>= 1
-        return crc
+                    return int(value)
+            else:
+                scaled_value = float(value) / reg_config.factor
+                return int(round(scaled_value))
+        except Exception as e:
+            self.logger.error(f"Failed to convert value {value} to register value: {e}")
+            raise
 
-    def _validate_protocol_type(self):
-        if self.protocol_config.protocol_type not in [t.value for t in ProtocolType]:
-            raise ValueError(
-                f"Invalid protocol type: {self.protocol_config.protocol_type}"
-            )
-
-    def build_monitor_command(
+    def build_poll_command(
         self,
-        data_type: PollDataType,
-        data_name: str,
-        use_multisend: bool = False
-    ) -> tuple[str, str]:
-        """构建监控命令 - 使用预编译的Modbus帧"""
-        command_key = f"monitor_{data_name}"
+        origin_commands: Sequence[tuple[str, Union[str, list[str]]]]
+    ) -> tuple[list[str], list[dict[str, Any]]]: 
+        """
+        构建轮询命令（读取寄存器）
         
-        if command_key in self._frame_cache:
-            frame = self._frame_cache[command_key]
-            register_info = self._register_cache[command_key]
-            
-            # 返回十六进制字符串和预期响应长度
-            hex_command = frame.hex().upper()
-            response_length = register_info["size"] * 2 + 5  # 设备地址+功能码+字节数+数据+CRC
-            
-            return (hex_command, str(response_length))
+        Args:
+            origin_commands: 原始命令元组序列，每个元组包含数据项名称和通道列表或单个通道字符串
+                - data_name: 数据项名称
+                - channels: 通道列表或单个通道字符串
         
-        raise ValueError(f"No precompiled command found for {data_name}")
+        Returns:
+            cmd_keys: 命令键列表
+            final_commands: Modbus请求字典列表
+        """
+        commands: list[dict[str, Any]] = []
+        cmd_keys: list[str] = []
+        
+        for data_name, channels in origin_commands:
+            try:
+                if isinstance(channels, str):
+                    channels = [channels]
+                
+                register_configs: list[tuple[str, str, ModbusRegister]] = []
+                for channel in channels:
+                    reg_config = self._get_register_config(data_name, channel)
+                    register_configs.append((data_name, channel, reg_config))
+                
+                merged_requests = self._merge_continuous_registers(register_configs)
+                
+                for request in merged_requests:
+                    unit_id = self._get_unit_id()
+                    modbus_request: dict[str, Any] = {
+                        'data_name': request['data_name'],
+                        'channels': request['channels'],
+                        'function_code': 0x03,
+                        'start_address': request['start_address'],
+                        'register_count': request['register_count'],
+                        'register_configs': request['register_configs'],
+                        'unit_id': unit_id
+                    }
+                    commands.append(modbus_request)
+                    cmd_keys.append(f"get_{data_name}")
+                    
+            except ValueError as e:
+                self.logger.warning(f"Failed to build poll command for {data_name}: {e}")
+                continue
+        
+        return cmd_keys, commands
 
     def build_control_command(
         self,
-        control_name: str,
-        value: Union[float, int, str],
-        use_multisend: bool = False
-    ) -> tuple[str, str]:
-        """构建控制命令 - 使用预编译的转换器"""
-        command_key = f"control_{control_name}"
+        origin_commands: Sequence[tuple[str, Union[str, list[str]], Any]]
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """
+        构建控制命令（写寄存器）
         
-        if command_key in self._register_cache:
-            register_info = self._register_cache[command_key]
-            converter = self._converter_cache[command_key]  #type: ignore
-            
-            # 转换值
-            if isinstance(value, (int, float)):
-                scaled_value = value / register_info["factor"]
-            else:
-                scaled_value = value
-            
-            # 构建写请求帧
-            frame = self._build_write_frame(register_info, scaled_value)
-            hex_command = frame.hex().upper()
-            
-            return (hex_command, "8")  # 标准写响应长度
+        Args:
+            origin_commands: 控制命令元组序列，每个元组包含:
+                - control_name: 控制项名称
+                - channels: 通道列表或单个通道字符串
+                - value: 要设置的值
         
-        raise ValueError(f"No precompiled command found for control {control_name}")
-
-    def build_update_command(
-        self,
-        update_key: str,
-        channel: Optional[str] = None,
-        use_multisend: bool = False
-    ) -> tuple[str, str]:
-        """构建更新命令 - 使用预编译的Modbus帧"""
-        # 从 update_key 提取数据名称
-        if update_key.startswith("get_"):
-            data_name = update_key[4:]
-        elif update_key.startswith("get_all_"):
-            data_name = update_key[8:]
-        else:
-            raise ValueError(f"Invalid update_key format: {update_key}")
+        Returns:
+            cmd_keys: 命令键列表
+            final_commands: Modbus请求字典列表
+        """
+        commands: list[dict[str, Any]] = []
+        cmd_keys: list[str] = []
         
-        # 尝试获取数据定义
-        data_def = None
-        for data_type in self.protocol_config.data.values():
-            if data_name in data_type:
-                data_def = data_type[data_name]
-                break
+        for control_name, channels, value in origin_commands:
+            try:
+                ctrl_def = self.protocol_config.controls.get(f"set_{control_name}",None)
+                if ctrl_def is None:
+                    raise ValueError(f"Control {control_name} not found in protocol config")
+                
+                self._validate_control_value(ctrl_def, value)
+                
+                if isinstance(channels, str):
+                    channels = [channels]
+                
+                for channel in channels:
+                    reg_config = self._get_register_config(control_name, channel)
+                    register_value = self._value_to_register_value(value, reg_config)
+                    unit_id = self._get_unit_id()
+                    
+                    modbus_request: dict[str, Any] = {
+                        'control_name': control_name,
+                        'channel': channel,
+                        'function_code': 0x06,
+                        'address': reg_config.address,
+                        'value': register_value,
+                        'unit_id': unit_id,
+                        'register_config': reg_config
+                    }
+                    commands.append(modbus_request)
+                    cmd_keys.append(f"set_{control_name}")
+                    
+            except ValueError as e:
+                self.logger.warning(f"Failed to build control command for {control_name}: {e}")
+                continue
         
-        if not data_def:
-            raise ValueError(f"No data definition found for {data_name}")
-        
-        # 如果没有指定 channel，使用数据定义中的 channel
-        if channel is None:
-            channel = data_def.channel
-        
-        # 使用预编译的帧
-        command_key = f"monitor_{data_name}"
-        
-        if command_key in self._frame_cache:
-            frame = self._frame_cache[command_key]
-            register_info = self._register_cache[command_key]
-            
-            # 返回十六进制字符串和预期响应长度
-            hex_command = frame.hex().upper()
-            response_length = register_info["size"] * 2 + 5  # 设备地址+功能码+字节数+数据+CRC
-            
-            return (hex_command, str(response_length))
-        
-        raise ValueError(f"No precompiled command found for {data_name}")
-
-    def _build_write_frame(self, register_info: dict[str, Any], value: Any) -> bytes:
-        """构建Modbus写请求帧"""
-        address = register_info["address"]
-        data_type = register_info["data_type"]
-        order = register_info["order"]
-        device_addr = int(self.address) if self.address else 1
-        function_code = 0x06  # 写单个寄存器
-        
-        # 打包数据
-        if data_type == "int16":
-            data = struct.pack(f">{order}h", int(value))
-        elif data_type == "uint16":
-            data = struct.pack(f">{order}H", int(value))
-        elif data_type == "int32":
-            function_code = 0x10  # 写多个寄存器
-            data = struct.pack(f">{order}i", int(value))
-        elif data_type == "uint32":
-            function_code = 0x10
-            data = struct.pack(f">{order}I", int(value))
-        elif data_type == "float":
-            function_code = 0x10
-            data = struct.pack(f">{order}f", float(value))
-        else:
-            data = struct.pack(">H", int(value))
-        
-        # 构建帧
-        if function_code == 0x06:
-            frame = struct.pack(">BBHH", device_addr, function_code, address, 0)
-            frame += data[:2]
-        else:
-            frame = struct.pack(">BBHH", device_addr, function_code, address, len(data) // 2)
-            frame += struct.pack("B", len(data))
-            frame += data
-        
-        # 添加CRC
-        crc = self._calculate_crc(frame)
-        return frame + struct.pack("<H", crc)
-
-    def _build_protocol_packet(
-        self,
-        command: str,
-        is_multisend: bool = False,
-        channel: Optional[str] = None
-    ) -> tuple[str, str]:
-        """构建协议报文"""
-        proto = self.protocol_config.protocols
-        
-        send_packet = proto.send.format(
-            command=command,
-            send_terminator=proto.send_terminator
-        )
-        
-        response_terminator = proto.recv_terminator if is_multisend else proto.response
-        
-        return (send_packet, response_terminator)
+        return cmd_keys, commands

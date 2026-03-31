@@ -2,6 +2,8 @@ import asyncio
 from typing import Any, Optional, Sequence, Union
 import logging
 
+from ....utils.convert_type import convert_type
+
 from ....models import PollDataType, DataFrame, DataCategory
 from ..base.ihandler import IHandler
 
@@ -84,10 +86,12 @@ class TcpHandler(IHandler):
             # 验证结果并构建DataFrame:
             for _data_name, channels in commands:
                 
-                layer_name = self.dataname_to_datatype.get(_data_name,PollDataType.MONITOR_FAST).dt
+                pln = self.dataname_to_datatype.get(_data_name,PollDataType.MONITOR_FAST)
+                layer_name = pln.dt
                 layer = data_frame[layer_name]
                 data_category = DataCategory(layer_name, _data_name)
 
+                value_type = self.protocol_config.data[pln][_data_name].type
                 result_name = parsed_results[0][0]
 
                 # 验证数据项名称, 如果不匹配则跳出循环,终止构建
@@ -100,15 +104,15 @@ class TcpHandler(IHandler):
                 # 如果是package数据直接添加到data_category
                 if isinstance(parsed_results[0][1], dict):
                     # 只要 enabled_channels 中的数据
-                    for key,value in parsed_results[0][1].items():
+                    for key,value in parsed_results[0][1].items(): #type:ignore
                         if key in channels:
-                            data_category[key] = value
+                            data_category[key] = convert_type(value, value_type) #type:ignore
                     del parsed_results[0]
                             
                 # 否则按顺序分发至通道中
                 else:
                     for channel in channels:
-                        data_category[channel] = parsed_results[0][1] #type:ignore
+                        data_category[channel] = convert_type(parsed_results[0][1], value_type) #type:ignore
                         del parsed_results[0]
                         if parsed_results == []:
                             break

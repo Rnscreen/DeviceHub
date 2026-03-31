@@ -7,7 +7,7 @@ from .base.idevice import IDeviceProtocol
 from ...models import ProtocolType,ProtocolConfig, DeviceConfig
 from typing import Type
 from .tcp  import TcpProtocol
-# from .modbus_tcp import ModbusTcpProtocol
+from .modbus_tcp import ModbusTcpProtocol
 # from .modbus_rtu import ModbusRtuProtocol
 # from .serial import SerialProtocol
 
@@ -17,9 +17,9 @@ logger = Logger(__name__)
 class ProtocolFactory:
     _protocol_classes:dict[ProtocolType,Type[IDeviceProtocol]] = {
         ProtocolType.TCP: TcpProtocol,
-        # ProtocolType.ModbusTcp: ModbusTcpProtocol,
-        # ProtocolType.Serial: SerialProtocol,
+        ProtocolType.MODBUS_TCP: ModbusTcpProtocol,
         # ProtocolType.ModbusRTU: ModbusRtuProtocol,
+        # ProtocolType.Serial: SerialProtocol,
         # ProtocolType.USB: UsbProtocol,
         # 其他协议...
     }

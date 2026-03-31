@@ -326,8 +326,7 @@ export class UIManager {
         dataCard.className = `data-card ${cardClass}`;
         dataCard.innerHTML = `
             <div class="data-label">
-                ${Utils.formatLabel(key)}
-                ${data.channel ? `<span class="channel-label">(${data.channel})</span>` : ''}
+                ${data.channel ? `<span class="channel-label">[${data.channel}]</span>` : ''}
             </div>
             <div class="data-value">${Utils.formatDisplayValue(data.value)}</div>
             <div class="data-unit">${data.unit || ''}</div>

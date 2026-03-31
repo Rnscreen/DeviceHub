@@ -7,6 +7,7 @@ from typing import Type
 from ....models import ProtocolConfig
 from ....services.protocols.base.ibuilder import ICommandBuilder
 from .ascii import AsciiCommandBuilder
+from .modbus import ModbusCommandBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,11 @@ class CommandBuilderFactory:
     @classmethod
     def _select_builder_class(cls, protocol_type: str) -> Type[ICommandBuilder]:
         """根据协议类型选择构建器类"""
-        builder_map = {
+        builder_map: dict[str, Type[ICommandBuilder]] = {
             'tcp': AsciiCommandBuilder,
             'ascii': AsciiCommandBuilder,
-            'modbus_tcp': AsciiCommandBuilder,
-            'modbus_rtu': AsciiCommandBuilder,
+            'modbus_tcp': ModbusCommandBuilder,
+            'modbus_rtu': ModbusCommandBuilder,
             'serial': AsciiCommandBuilder,
             'usb': AsciiCommandBuilder,
         }

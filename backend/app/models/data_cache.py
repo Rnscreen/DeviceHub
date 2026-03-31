@@ -61,13 +61,3 @@ class DataCache(DataFrame):
                 # 创建category
                 layer.get_category(category, channelkeys)
 
-        # 2. 初始化controls
-        channelkeys:dict[str,list[str]]={}
-        for category, ctrl_def in protocol_config.controls.items():
-            channelkeys={category:self._get_channels_by_enabled(
-                        protocol_config,
-                        device_config,
-                        ctrl_def.channel_group
-                        )}
-            if self.controls is not None:
-                self.controls.get_category(category, channelkeys)

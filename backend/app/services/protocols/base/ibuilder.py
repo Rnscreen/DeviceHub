@@ -64,7 +64,7 @@ class ICommandBuilder(ABC):
 
     @abstractmethod
     def build_poll_command(self,
-        origin_commands: Sequence[tuple[str, Union[str,list[str]]]]) -> tuple[list[str], list[str]]:
+        origin_commands: Sequence[tuple[str, Union[str,list[str]]]]) -> tuple[list[str], list[Any]]:
         """构建轮询命令 - 优先使用批量命令
         
         Args:
@@ -82,7 +82,7 @@ class ICommandBuilder(ABC):
     def build_control_command(
         self,
         origin_commands: Sequence[tuple[str, Union[str, list[str]], Any]]
-    ) -> tuple[list[str], list[str]]:
+    ) -> tuple[list[str], list[Any]]:
         """构建控制命令
         
         Args:

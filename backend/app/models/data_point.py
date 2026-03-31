@@ -14,7 +14,6 @@ class DataType(str, Enum):
     STREAM
     STATUS
     INFO
-    CONTROLS
     """
     MONITOR = "monitor"
     MONITOR_FAST= MONITOR
@@ -22,7 +21,6 @@ class DataType(str, Enum):
     STREAM = "stream"
     STATUS = "status"
     INFO = "info"
-    CONTROLS = "controls"
 
 class DataCategory:
     """数据类别 - 动态通道管理"""
@@ -123,7 +121,6 @@ class DataFrame(BaseModel):
     stream: Optional[DataTypeLayer] = None
     status: Optional[DataTypeLayer] = None
     info: Optional[DataTypeLayer] = None
-    controls: Optional[DataTypeLayer] = None
     
     def __init__(self, **data:Any):
         # 初始化各层
@@ -132,7 +129,6 @@ class DataFrame(BaseModel):
         self.stream = DataTypeLayer(DataType.STREAM)
         self.status = DataTypeLayer(DataType.STATUS)
         self.info = DataTypeLayer(DataType.INFO)
-        self.controls = DataTypeLayer(DataType.CONTROLS)
 
     def __getitem__(self, data_type: DataType) -> DataTypeLayer:
         """获取数据类型层"""

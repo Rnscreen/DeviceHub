@@ -191,9 +191,12 @@ class IHandler(ABC):
         Returns:
             更新后的DataTypeLayer
         """
+        data_names = self.datatype_to_data_name[data_type]
         commands = [
-            (data_name, self.enabled_channels.get(self.dataname_to_channels[data_name], self.dataname_to_channels[data_name]))
-            for data_name in self.datatype_to_data_name[data_type]
+            (data_name, self.enabled_channels.get(
+                self.dataname_to_channels[data_name], 
+                'main'))
+            for data_name in data_names
         ]
 
         result = (await self.execute_monitor(commands))[data_type.dt]
@@ -207,9 +210,10 @@ class IHandler(ABC):
                     new_result.add_category(data_name, result.get_category(data_name))
 
             result = new_result
-        else:
 
+        else:
             self.data_cache[data_type.dt].update(result)
+            
         return result
 
     async def update_by_dataname(self, data_name: str) -> DataCategory:

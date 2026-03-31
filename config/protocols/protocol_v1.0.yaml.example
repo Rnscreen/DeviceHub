@@ -102,14 +102,14 @@ protocols:
   #verify: 校验方法，可选, 可选值: crc16,crc32,ccitt,lrc,checksum,自定义函数(直接输入eval表达式)
   #verify: Null
 
-  response: "{prefix}{response_code}{response_data}"
+  response: "{prefix}{response_code} {response_data}"
     # {prefix} 需要根据协议说明,替换成正确的前缀
   send_terminator: "\r\n"
     # send专用的发送终止符, 用于send, multisend模式下也用来对多行发送进行分割
   recv_terminator: "\r\n"
     # recv专用的接收终止符, 用于readuntil, multisend模式下也用来对多行响应进行分割
 
-  error: "{prefix}{response_code}{response}"
+  error: "{prefix}{response_code} {response_data}"
     # 可选, response的分支, 如果response在错误响应码里(应在enums定义)
     # error_code: response_code
     # error_data: response_data

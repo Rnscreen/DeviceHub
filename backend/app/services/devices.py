@@ -4,7 +4,7 @@
 """
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Optional, Any
+from typing import TYPE_CHECKING, Optional, Any
 
 import asyncio
 import logging
@@ -27,8 +27,8 @@ class DeviceManager:
     """设备管理器"""
     
     # 类常量
-    CONFIG_DIR: ClassVar[Path] = Path(__file__).parent.parent.parent.parent / 'config'
-    PROTOCOLS_DIR: ClassVar[Path] = CONFIG_DIR / 'protocols'
+    CONFIG_DIR = settings.CONFIG_PATH
+    PROTOCOLS_DIR = CONFIG_DIR/"protocols"
     
     @property
     def device_configs(self) -> dict[str, DeviceConfig]:

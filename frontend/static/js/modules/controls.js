@@ -4,7 +4,7 @@ export class ControlManager {
         this.uiManager = uiManager;
         this.deviceManager = deviceManager;
         this.wsManager = wsManager;
-        this.apiHost = apiHost.replace(/\/$/, ''); // 移除末尾的斜杠
+        this.apiHost = 'http://' + apiHost.replace(/\/$/, ''); // 移除末尾的斜杠
     }
 
     // 初始化控制事件

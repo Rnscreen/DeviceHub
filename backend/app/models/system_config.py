@@ -56,9 +56,10 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="调试模式")
 
     # 配置文件路径（相对于项目根目录）
-    SYSTEM_CONFIG_PATH: str = Field(default="../config/system.yaml", description="系统配置文件路径")
-    DEVICE_CONFIG_PATH: str = Field(default="../config/devices.yaml", description="设备配置文件路径")
-
+    ROOT_PATH: Path = Path(str(Path(__file__))[:str(Path(__file__)).find('backend')]) #"项目根目录路径"
+    CONFIG_PATH: Path = Path(ROOT_PATH / "config") 
+    SYSTEM_CONFIG_PATH: Path = Path(CONFIG_PATH / "system.yaml")
+    DEVICE_CONFIG_PATH: Path = Path(CONFIG_PATH / "devices.yaml")
     # 动态加载的配置
     _system_config: Optional[SystemConfig] = None
     _devicehub_config: Optional[DeviceHubConfig] = None
@@ -71,7 +72,7 @@ class Settings(BaseSettings):
     hot_reload_enabled: bool = Field(default=False, description="是否启用热重载")
 
     model_config = SettingsConfigDict(
-        env_file="../.env",  # 相对于backend/app目录
+        env_file=f"{str(ROOT_PATH)}/backend/.env",
         env_file_encoding="utf-8",
         case_sensitive=True,
         arbitrary_types_allowed=True,
@@ -87,32 +88,28 @@ class Settings(BaseSettings):
     def _load_configs(self) -> None:
         """加载所有配置文件"""
         # 获取项目根目录
-        project_root = Path(__file__).parent.parent.parent
-        
         # 加载系统配置
         if self._system_config is None:
-            system_path = project_root / self.SYSTEM_CONFIG_PATH
             try:
-                if system_path.exists():
-                    with open(system_path, 'r', encoding='utf-8') as f:
+                if self.SYSTEM_CONFIG_PATH.exists():
+                    with open(self.SYSTEM_CONFIG_PATH, 'r', encoding='utf-8') as f:
                         yaml_data = yaml.safe_load(f)
                         self._system_config = SystemConfig.load(yaml_data)
                 else:
                     self._system_config = SystemConfig()
-                    logger.warning(f"⚠️ 系统配置文件不存在: {system_path}")
+                    logger.warning(f"⚠️ 系统配置文件不存在: {self.SYSTEM_CONFIG_PATH}")
             except Exception as e:
                 logger.error(f"加载系统配置失败: {e}")
                 self._system_config = SystemConfig()
 
         # 加载设备配置
         if self._devicehub_config is None:
-            device_path = project_root / self.DEVICE_CONFIG_PATH
             try:
-                if device_path.exists():
-                    self._devicehub_config = DeviceHubConfig().from_yaml(device_path)
+                if self.DEVICE_CONFIG_PATH.exists():
+                    self._devicehub_config = DeviceHubConfig().from_yaml(self.DEVICE_CONFIG_PATH)
                     self.device_configs = self._devicehub_config.devices
                 else:
-                    logger.warning(f"⚠️ 设备配置文件不存在: {device_path}")
+                    logger.warning(f"⚠️ 设备配置文件不存在: {self.DEVICE_CONFIG_PATH}") 
                     return
             except Exception as e:
                 logger.error(f"加载设备配置失败: {e}")
@@ -206,13 +203,9 @@ class Settings(BaseSettings):
         Args:
             file_path: 变化的文件路径
         """
-        project_root = Path(__file__).parent.parent.parent
-        system_path = project_root / self.SYSTEM_CONFIG_PATH
-        device_path = project_root / self.DEVICE_CONFIG_PATH
-        
         file_path_obj = Path(file_path)
         
-        if file_path_obj == system_path:
+        if file_path_obj == self.SYSTEM_CONFIG_PATH:
             logger.info(f"检测到 system.yaml 变化，正在重启...")
             # 重启应用
             import os
@@ -220,7 +213,7 @@ class Settings(BaseSettings):
             os.execv(sys.executable, [sys.executable] + sys.argv)
             
             
-        elif file_path_obj == device_path:
+        elif file_path_obj == self.DEVICE_CONFIG_PATH:
             logger.info(f"检测到 devices.yaml 变化，重新加载...")
             self._devicehub_config = None
             self._load_configs()
@@ -242,16 +235,12 @@ class Settings(BaseSettings):
             
         try:
             from ..services import file_watcher
-            
-            project_root = Path(__file__).parent.parent.parent
-            system_path = str(project_root / self.SYSTEM_CONFIG_PATH)
-            device_path = str(project_root / self.DEVICE_CONFIG_PATH)
-            
+                        
             # 监听系统配置文件
-            file_watcher.watch_file(system_path, self._on_config_changed)
+            file_watcher.watch_file(self.SYSTEM_CONFIG_PATH.as_posix(), self._on_config_changed)
             
             # 监听设备配置文件
-            file_watcher.watch_file(device_path, self._on_config_changed)
+            file_watcher.watch_file(self.DEVICE_CONFIG_PATH.as_posix(), self._on_config_changed)
             
             self.hot_reload_enabled = True
             logger.info("✅ 配置文件热重载已启用")

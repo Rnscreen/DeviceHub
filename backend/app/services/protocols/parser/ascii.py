@@ -1,7 +1,7 @@
 from typing import Sequence
 import re
 import logging
-from typing import Any, Optional, Union, Callable # type: ignore
+from typing import Any, Union, Callable
 from ....models import ProtocolConfig, ParseStep, PackageConfig
 # from ..base.ihandler import IHandler
 from ..base.iparser import IResponseParser
@@ -134,7 +134,15 @@ class AsciiResponseParser(IResponseParser):
         results: list[tuple[str, Any]] = []
 
         for cmd_key, response in origin_responses:
-            data_name = cmd_key.split("_")[-1]
+            # cmd_key 格式: get_<data_name>, get_all_<data_name>
+            # 但<data_name>可能包含下划线, 如: get_all_pump_size
+            if cmd_key.startswith("get_all_"):
+                data_name = cmd_key[8:]
+            elif cmd_key.startswith("get_"):
+                data_name = cmd_key[4:]
+            else:
+                data_name = cmd_key
+                
             data_config = cmd_key in self._parse_config
             
             if data_config:
@@ -182,8 +190,33 @@ class AsciiResponseParser(IResponseParser):
         
         return values, updates
 
-    def _execute_parse(self, parse_key: str, response: str) -> Union[dict[str, Any],int,float,str,bool,None]:
+    def _execute_parse(self, parse_key: str, ori_response: str) -> Union[dict[str, Any],int,float,str,bool,None]:
         """执行预编译的解析步骤"""
+        # 获取 protocol_config中的错误匹配模板
+        if (error_template := self.protocol_config.protocols.error):
+            # 将模板转换为正则表达式
+            from ....utils.template_to_regex import template_to_regex
+            error_regex = template_to_regex(error_template)
+            match = re.match(error_regex, ori_response)
+            if match:
+                self.logger.error(f"Error response matched: {match.groupdict()}")
+                return False
+
+        # 获取 protocol_config中的响应匹配模板
+        if (response_template := self.protocol_config.protocols.response):
+            # 将模板转换为正则表达式
+            from ....utils.template_to_regex import template_to_regex
+            response_regex = template_to_regex(response_template)
+            match = re.match(response_regex, ori_response)
+            if match and (match_dict := match.groupdict()):
+                # self.logger.info(f"Response matched: {match_dict}")
+                # 先取response_data, 若不存在则取response, 若response也不存在, 则取原始响应
+                response = match_dict.get("response_data", False) or match_dict.get("response", ori_response)
+            else:
+                response = ori_response
+        else:
+            response = ori_response
+
         steps = self._compiled_parse_steps.get(parse_key, [])
         
         if not steps:
@@ -204,8 +237,7 @@ class AsciiResponseParser(IResponseParser):
                 return None
         
         for _ in vars:
-            if isinstance(_,str):
-                _=_.strip()
+            _=_.strip()
 
         # 处理结果
         if parse_key in self._compiled_packages:
@@ -258,36 +290,26 @@ class AsciiResponseParser(IResponseParser):
         }
         
         try:
-            local_vars: dict[str, Any] = {'vars': vars, 'index': 0}
-            result = eval(result_expr, safe_globals, local_vars)
+            # 检查是否为枚举类型
+            is_enum = result_expr.startswith("enum.")
+            if is_enum:
+                second_dot_index = result_expr.find(".", 5)
+                if second_dot_index == -1:
+                    raise ValueError(f"Invalid enum expression: {result_expr}")
+                enum_group = result_expr[5:second_dot_index]
+                _expr = result_expr[second_dot_index+1:]
+
+                # 去除枚举修饰后的表达式，正常求值
+                local_vars: dict[str, Any] = {'vars': vars, 'index': 0}
+                key = eval(_expr, safe_globals, local_vars)
+
+                result = self.protocol_config.enums[enum_group][key]
+            else:
+                # 非枚举类型，正常求值
+                local_vars: dict[str, Any] = {'vars': vars, 'index': 0}
+                result = eval(result_expr, safe_globals, local_vars)
+
             return result
         except Exception as e:
             self.logger.error(f"Result evaluation failed for {parse_key}: {e}")
             return vars[0] if vars else None
-    
-    def parse_batch_response(self, response: str, data_name: str, terminator: str) -> dict[str, Any]:
-        """解析批量响应（多行）"""
-        # 分割多行响应
-        lines = response.split(terminator)
-        lines = [line.strip() for line in lines if line.strip()]
-        
-        parse_key = f"get_all_{data_name}"
-        if parse_key not in self._compiled_parse_steps:
-            raise ValueError(f"No batch parse definition found for {data_name}")
-        
-        # 合并所有行的结果
-        all_vars: list[str] = []
-        for line in lines:
-            steps = self._compiled_parse_steps[parse_key]
-            vars: list[str] = [line]
-            
-            for step_func in steps:
-                try:
-                    vars = step_func(vars, line)
-                    if vars:
-                        all_vars.extend(vars)
-                except Exception as e:
-                    self.logger.warning(f"Batch parse step failed for line '{line}': {e}")
-        
-        # 打包结果
-        return self._package_result(parse_key, all_vars)

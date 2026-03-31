@@ -1,4 +1,3 @@
-# \backend\app\services\parser\factory.py
 """
 响应解析管理器
 """
@@ -31,12 +30,12 @@ class ResponseParserFactory:
         """根据协议类型选择解析器类"""
         from . import (
             AsciiResponseParser,
-        #     ModbusResponseParser
+            ModbusResponseParser
         )
         
         parser_map:dict[str, Type[IResponseParser]] = {
             'tcp': AsciiResponseParser,
-            #  'modbus_tcp': ModbusResponseParser,
-            #  'modbus_rtu': ModbusResponseParser
+            'modbus_tcp': ModbusResponseParser,
+            'modbus_rtu': AsciiResponseParser
         }
         return parser_map.get(protocol_type, AsciiResponseParser)

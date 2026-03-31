@@ -19,6 +19,7 @@ tests/
 *.old
 *.tmp
 *.temp
+*git.*
 
 # system files
 .DS_Store

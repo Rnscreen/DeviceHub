@@ -2,7 +2,7 @@ export class ChartManager {
     constructor() {
         this.chartInstances = new Map(); // 存储图表实例：key = "deviceId.dataType"
         this.chartData = new Map(); // 存储图表数据
-        this.maxDataPoints = 500; // 最大数据点数
+        this.maxDataPoints = 300; // 最大数据点数
     }
 
     // 初始化高性能图表
@@ -71,11 +71,26 @@ export class ChartManager {
             },
             yAxis: {
                 type: 'value',
-                scale: true, // 自动缩放
-                splitLine: {
-                    show: true,
-                    lineStyle: {
-                        type: 'dashed'
+                axisLabel: {
+                    formatter: function (value) {
+                    if (Math.abs(value) < 1 && value !== 0) {
+                        // 小于1的情况，处理为负指数
+                        let numN2 = 0;
+                        while (Math.abs(value) < 1) {
+                            value *= 10;
+                            numN2++;
+                        }
+                        return value.toFixed(1) + "e-" + numN2;
+                    } else if (Math.abs(value) >= 10000) {
+                        // 大于等于10000的情况，处理为正指数
+                            let numN1 = 0;
+                            while (Math.abs(value) >= 10) {
+                            value /= 10;
+                            numN1++;
+                            }
+                        return value.toFixed(1) + "e" + numN1;
+                        }
+                        return value; // 普通显示
                     }
                 }
             },
