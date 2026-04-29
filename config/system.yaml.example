@@ -27,30 +27,25 @@ security:
 database:
   type: "sqlite"  # sqlite, postgres, mysql
   sqlite:
+    path: "\\data\\"
     journal_mode: "WAL"
-  # postgres: 暂未实现
-  #   host: "localhost"
-  #   port: 5432
-  #   database: "industrial_gateway"
-  #   username: "postgres"
-  #   password: "password"
   
 # 监控配置
 monitoring:
   polling:
     interval: 1.0 #未在设备设置超时的，默认使用1秒
     enabled: true #默认启用轮询
-  alerting: #未实现
+  alerting:
     enabled: true
     webhook_url: ""
     email_notifications: false  #alerting发送邮件
-  metrics:  #未实现
+  metrics:
     enabled: true
     export_port: 9090
     
 # 日志配置
 logging:
-  level: "INFO"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   file:
     enabled: true
     path: "logs/industrial_gateway.log"
@@ -59,8 +54,7 @@ logging:
   console:
     enabled: true
     format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-# 以下暂未实现
+    
 # # WebSocket配置
 # websocket:
 #   heartbeat_interval: 30
@@ -72,3 +66,32 @@ logging:
 #   default_timeout: 5.0
 #   reconnect_interval: 10.0
 #   max_retries: 3
+  
+# # 数据存储
+# data_storage:
+#   retention_days: 30
+#   auto_cleanup: true
+#   backup:
+#     enabled: false
+#     interval_hours: 24
+#     keep_backups: 7
+    
+# # API配置
+# api:
+#   enabled_endpoints:
+#     - "devices"
+#     - "data"
+#     - "alerts"
+#     - "config"
+#     - "system"
+#   default_page_size: 100
+#   max_page_size: 1000
+  
+# # 前端配置
+# frontend:
+#   theme: "dark"
+#   auto_refresh: true
+#   refresh_interval: 5
+#   chart:
+#     default_time_range: "1h"
+#     update_interval: 1000

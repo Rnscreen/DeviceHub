@@ -6,7 +6,8 @@ from typing import  Optional, Union
 import logging
 from abc import ABC, abstractmethod
 
-from ....models import ProtocolConfig, PollDataType, DeviceConfig, DataFrame
+from ....models import (ProtocolConfig, PollDataType, DeviceConfig, DataFrame, 
+                        PollCommand, ControlCommand, BatchCommands, PollCommands, ControlCommands) # type: ignore
 from .iconnection import IConnection
 from .ibuilder import ICommandBuilder
 from .iparser import IResponseParser
@@ -41,7 +42,7 @@ class IHandler(ABC):
         self.alarm_values = self.builder.alarm_values
 
     @abstractmethod
-    async def execute_monitor(self, commands: Sequence[tuple[str, Union[str, list[str]]]]) -> DataFrame:
+    async def execute_monitor(self, commands: PollCommands) -> DataFrame:
         """执行批量命令
         
         Args:
@@ -58,12 +59,12 @@ class IHandler(ABC):
         """
 
     @abstractmethod
-    async def execute_control(self, commands: Sequence[tuple[str, Optional[str], str]]) -> list[bool]:
+    async def execute_control(self, commands: ControlCommands) -> Sequence[bool]:
         """执行批量命令
         
         Args:
             commands: 命令序列
-            - 每个元素为 (data_name, channel, value)
+            - 每个元素为 (control_name, channel, value)
             - channel: 通道名称， 必须指定, 无通道则默认为main
             - value: 要设置的值, 若为''则可能为开关操作如command:"STArt"则直接执行, 此时无{value}占位符的替换
 
@@ -98,7 +99,7 @@ class IHandler(ABC):
         """
         self.logger.error(f"{context}: {error}")
     
-    def execute_query(self, commands: Sequence[tuple[str, Union[str, list[str]]]]) -> DataFrame:
+    def execute_query(self, commands: PollCommands) -> DataFrame:
         """从self.data_cache中查询数据
         
         Args:
@@ -116,15 +117,19 @@ class IHandler(ABC):
             return self.data_cache
         
         # 构建data_frame
-        for data_name, channel in commands:
+        for cmd in commands:
+            data_name, channel = cmd.data_name, cmd.channel
             datatype = self.dataname_to_datatype[data_name].dt
 
             # 获取data_name和channel对应的DataCategory
             data_category = DataCategory(datatype, data_name)
 
+            if channel is None:
+                channel = self.enabled_channels.get(self.dataname_to_channels[data_name], 'main')
+    
             if isinstance(channel, str):
                 channel = [channel]
-
+                
             for ch in channel:
                 data_category[ch] = self.data_cache[datatype][data_name][ch]
 
@@ -134,7 +139,7 @@ class IHandler(ABC):
 
 
 
-    async def execute_batch(self, commands: Sequence[tuple[str, Optional[str], Optional[str]]]) -> list[Union[DataFrame, list[bool]]]:
+    async def execute_batch(self, commands: BatchCommands) -> Sequence[Union[DataFrame, Sequence[bool]]]:
         """执行批量命令
         
         Args:
@@ -146,26 +151,26 @@ class IHandler(ABC):
         Returns:
             执行结果
         """
-        result:list[Union[DataFrame, list[bool]]] = []
+        result:list[Union[DataFrame, Sequence[bool]]] = []
 
         # 命令分类，将查询和控制命令分开
-        query_cache:list[tuple[str, Union[str, list[str]]]] = []
-        control_cache:list[tuple[str, Optional[str], str]] = []
+        query_cache:PollCommands = []
+        control_cache:ControlCommands = []
         last_is_control:Optional[bool] = None
 
         # 交错执行查询和控制命令
 
-        for data_name, channel, value in commands:
-            # 如果value与上一个command相同，存入cache，否则立刻执行
-            if value == None:
-                if channel is None:
-                     channel = self.enabled_channels.get(self.dataname_to_channels[data_name], 'main')
-                query_cache.append((data_name, channel))
+        for cmd in commands:
+            # 分类查询和控制命令
+            if isinstance(cmd, PollCommand):
+                query_cache.append(cmd)
                 this_is_control = False
-            else:
-                control_cache.append((data_name, channel, value))
+            else: 
+                # isinstance(cmd, ControlCommand)
+                control_cache.append(cmd)
                 this_is_control = True
 
+            # 如果类型切换，执行上一个缓存
             if last_is_control is None or last_is_control!=this_is_control:
                 if last_is_control:
                     result.append(await self.execute_control(control_cache))
@@ -193,7 +198,7 @@ class IHandler(ABC):
         """
         data_names = self.datatype_to_data_name[data_type]
         commands = [
-            (data_name, self.enabled_channels.get(
+            PollCommand(data_name, self.enabled_channels.get(
                 self.dataname_to_channels[data_name], 
                 'main'))
             for data_name in data_names
@@ -227,7 +232,7 @@ class IHandler(ABC):
         """
         data_type = self.dataname_to_datatype[data_name]
         commands = [
-            (data_name, self.enabled_channels.get(self.dataname_to_channels[data_name], ''))
+            PollCommand(data_name, self.enabled_channels.get(self.dataname_to_channels[data_name], 'main'))
         ]
 
         layer = (await self.execute_monitor(commands))[data_type.dt]

@@ -2,7 +2,7 @@
 协议配置的类型定义
 """
 # backend/app/models/protocol_config.py
-from typing import ClassVar, Optional, Union, Any, Literal
+from typing import ClassVar, Optional, Sequence, Union, Any, Literal
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
@@ -51,12 +51,12 @@ class ModbusRegister(BaseModel):
 
 class ModbusChannel(dict[str, ModbusRegister]):
     """Modbus模式通道 - 寄存器配置"""
-    # def get_channels(self)-> list[str]:
-    #     """获取ModbusChannel的通道列表"""
-    #     v:list[str]=[]
-    #     for _ in self:
-    #         v.extend(list(_.keys()))
-    #     return v
+    def get_channels(self)-> dict[str,int]:
+        """获取ModbusChannel的通道列表"""
+        v:dict[str,int]={}
+        for key,reg in self.items():
+            v[key]=reg.address  
+        return v
 
 AsciiChannel=list[str] #Modbus模式通道 - 寄存器配置"""
 Channel = Union[str,AsciiChannel,ModbusChannel]
@@ -100,7 +100,7 @@ class DataDefinition(BaseModel):
     description: str
     channel_group: str = "main"
     channel: Optional[str] = Field(default=None, validation_alias="channel")
-    type: Literal["int", "float", "str", "bool", None] = "str"
+    type: Literal["int", "float", "str", "bool", "enum", "None"] = "str"
     max: Optional[float] = None
     min: Optional[float] = None
 
@@ -131,13 +131,12 @@ class ControlDefinition(DataDefinition):
     max: Optional[float] = None
     min: Optional[float] = None
     enum: Optional[str] = None  # 枚举名，引用protocol.enums中的枚举
-    type: Literal["int", "float", "str", "bool", None] = "float"
 
     @model_validator(mode="after")
     def validate_type_enum(self) -> "ControlDefinition":
-        """验证type和enum互斥"""
+        """验证type和enum是否一致"""
         if self.enum is not None:
-            self.type = None
+            self.type = "enum"
         return self
 
 # 解析步骤
@@ -248,6 +247,50 @@ class ProtocolCommand(BaseModel):
                     else f"get_{data_name}" if hasattr(self, f"get_{data_name}")
                     else "get_default"
                     )
+
+
+def what_command(data_name: str, channel: Union[str, list[str], None] = None, value: Optional[str] = 'get_only'):
+    """构建命令"""
+    if value == 'get_only':
+        return PollCommand(data_name=data_name, channel=channel)
+    else:
+        if channel is None:
+            channel = "main"
+        if isinstance(channel, str):
+            return ControlCommand(control_name=data_name, channel=channel, value=value)
+        else:
+            raise ValueError("channel must be a string.")
+        
+# 轮询命令 (data_name, channel|channel_group)
+class PollCommand(BaseModel):
+    """轮询命令"""
+    data_name: str
+    channel: Union[str, list[str], None]
+    def __init__(self, data_name: str,
+                 channel: Union[str, list[str], None] = None):
+        super().__init__(data_name=data_name, channel=channel)
+# 控制命令 (data_name, channel, value)
+class ControlCommand(BaseModel):
+    """控制命令"""
+    data_name: str
+    control_name: str = Field(alias="data_name") # data_name别名为control_name
+    channel: str
+    value: Optional[str]
+    def __init__(self, control_name: str,
+                 channel: str = "main",
+                 value: Optional[str] = None):
+        if value == '':
+            value = None
+        super().__init__(data_name=control_name, channel=channel, value=value)
+class BuildCommand(BaseModel):
+    """构建命令"""
+    data_name: str
+    channel: Union[str, list[str], None]
+    value: Optional[str] = None
+# 命令序列
+PollCommands = Sequence[PollCommand]
+ControlCommands = Sequence[ControlCommand]
+BatchCommands = Sequence[PollCommand | ControlCommand]
 
 # 主协议配置
 class ProtocolConfig(BaseModel):

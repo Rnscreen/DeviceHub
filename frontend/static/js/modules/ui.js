@@ -489,13 +489,27 @@ export class UIManager {
             paramGroup.className = 'param-group';
             
             const label = document.createElement('label');
-            label.textContent = `${param.name} (${param.type})`;
+            label.textContent = `${param.name}:${param.type}`;
             if (param.required) {
                 label.innerHTML += '<span style="color:red">*</span>';
             }
             
             // 判断是否需要使用下拉框
-            if (param.options && param.options.length > 0) {
+            if (param.type === null) 
+            {
+                // 使用disabled文本框
+                const textarea = document.createElement('textarea');
+                textarea.className = 'param-input';
+                textarea.dataset.paramName = '无需参数';
+                textarea.placeholder = null;
+                textarea.rows = 2;
+                textarea.disabled = true;
+                textarea.hidden = true;
+                
+                paramGroup.appendChild(label);
+                paramGroup.appendChild(textarea);
+            }
+            else if (param.options && Object.keys(param.options).length > 0) {
                 // 使用下拉框
                 const select = document.createElement('select');
                 select.className = 'param-select';
@@ -509,16 +523,17 @@ export class UIManager {
                 select.appendChild(defaultOption);
                 
                 // 添加选项
-                param.options.forEach(option => {
+                Object.entries(param.options).forEach(([value, text]) => {
                     const optionElement = document.createElement('option');
-                    optionElement.value = option;
-                    optionElement.textContent = option;
+                    optionElement.value = value;
+                    optionElement.textContent = text;
                     select.appendChild(optionElement);
                 });
                 
                 paramGroup.appendChild(label);
                 paramGroup.appendChild(select);
-            } else {
+            }
+            else{
                 // 使用文本框
                 const textarea = document.createElement('textarea');
                 textarea.className = 'param-input';

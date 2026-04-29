@@ -76,24 +76,37 @@
 │     ├─ js
 │     └─ index.html
 ├─ README.md
-├─ scripts # 脚本目录，未实现
-│  ├─ build.cmd
-│  ├─ install.cmd
-│  └─ run.cmd
+├─ scripts 
+│  ├─ install.cmd  # Windows安装虚拟环境以及依赖
+│  ├─ install.sh  # linux安装脚本, 未经过测试
+│  ├─ run.cmd  # windows运行脚本
+│  └─ run.sh  # linux运行脚本, 未经过测试
 └─ shared # 共享目录，未使用
    ├─ openapi
    ├─ schema
    └─ types
 ```
 
-## 热更新功能（画饼中, 待实现）
+## 热更新功能
 系统支持配置文件热更新：
-1. 协议配置：修改 config/protocols/下的YAML文件，自动重新加载
-2. 设备配置：修改 config/devices.yaml，自动应用新配置
-3. 系统配置：修改 config/system.yaml，自动重启
+1. 协议配置：修改 config/protocols/下的YAML文件，自动重新加载 (已实现)
+2. 设备配置：修改 config/devices.yaml，自动应用新配置 (待实现)
+3. 系统配置：修改 config/system.yaml，自动重启 (待实现)
 
-***
+## 许可证
+### 当前许可证
+本项目采用 **[Apache License 2.0](LICENSE)** 开源许可证发布。
 
-版本: V0.1.1
-最后更新: 2026年3月31日
+### 商业合作
+如有商业合作需求（定制开发、技术支持、企业部署等），请联系：[Rnscreen](mailto:rainscreen12@outlook.com)
+
+### 免责声明
+⚠️ **重要提示**：
+1. 本项目仍在积极开发中，API 和功能可能发生变化
+2. 为支持项目可持续发展，未来可能引入商业授权功能
+3. 具体法律条款以 [LICENSE](LICENSE) 文件为准
+
+---
+版本: V0.1.2
+最后更新: 2026年4月29日
 DeviceHub - 让设备接入更简单(bushi)~

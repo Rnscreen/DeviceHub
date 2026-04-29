@@ -81,7 +81,7 @@ controls:
 
 # 6. 通信协议格式
 protocols:
-  multisend: True  #打开后, poll多行发送, 而非每个通道单独进行send-response轮询, 需验证设备支持性
+  multisend: False  #打开后, poll多行发送, 而非每个通道单独进行send-response轮询, 需验证设备支持性
   # 示例 poll temperature, multisend: True:
     # send: command1\r\ncommand2\r\n
     # response: response1\r\nresponse2\r\n

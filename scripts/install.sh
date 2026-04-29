@@ -26,7 +26,18 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 提示用户完成安装
-echo "安装完成！按下 Enter 键启动项目..."
+echo "安装完成！正在复制配置模板..."
+
+# 将配置模板复制并去除 .example 后缀
+cd "$PROJECT_ROOT/config"
+# cp protocols\protocol_v1.0.yaml.example protocols\protocol_v1.0.yaml
+# 因为已经有mock协议，所以这里不复制原有的protocol_v1.0.yaml文件
+cp PUMP_mock_v1.0.yaml.example PUMP_mock_v1.0.yaml
+cp TC_mock_v1.0.yaml.example TC_mock_v1.0.yaml
+cp devices.yaml.example devices.yaml
+cp system.yaml.example system.yaml
+
+echo "配置模板复制完成！按任意键启动项目..."
 read
 
 # 运行 scripts/run.sh 启动项目

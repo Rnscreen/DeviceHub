@@ -1,4 +1,7 @@
 from datetime import timezone
+
+from ....models.protocol_config import BatchCommands
+from ....models import ControlCommand
 """
 动态基类协议
 """
@@ -131,7 +134,7 @@ class IDeviceProtocol:
             self.logger.error('轮询失败, 返回缓存数据', exc_info = True)
             return self._data_cache
 
-    async def execute(self, commands: Sequence[tuple[ str, Optional[str], Optional[str]]]) -> list[Union[DataFrame, list[bool]]]:
+    async def execute(self, commands: BatchCommands) -> Sequence[Union[DataFrame, Sequence[bool]]]:
         """批量执行命令"""
         if self._handler is None:
             raise RuntimeError("Handler not initialized")
@@ -187,8 +190,10 @@ class IDeviceProtocol:
         """
         if self._handler is None:
             raise RuntimeError("Handler not initialized")
+        # 转换为ControlCommand
+        control_cmd = ControlCommand(control_name, channel, value)
 
-        return (await self._handler.execute_control([(control_name, channel, value)]))[0]
+        return (await self._handler.execute_control([control_cmd]))[0]
 
     # ------------连接初始化------------
     async def connect(self) -> bool:
@@ -207,6 +212,7 @@ class IDeviceProtocol:
     async def __exit__(self, *exc:Any):
         await self.disconnect()
 
-    # 可选：防止重复关闭
-    async def __del__(self):
-        await self.disconnect()
+    # 
+    def __del__(self):
+        pass
+       

@@ -4,10 +4,13 @@
 """
 from typing import Type
 from .base.idevice import IDeviceProtocol
-from ...models import ProtocolType,ProtocolConfig, DeviceConfig
+from ...models import ProtocolType
+from ...models import settings
+from .builder.factory import CommandBuilderFactory
+from .parser.factory import ResponseParserFactory
 from typing import Type
 from .tcp  import TcpProtocol
-from .modbus_tcp import ModbusTcpProtocol
+# from .modbus_tcp import ModbusTcpProtocol
 # from .modbus_rtu import ModbusRtuProtocol
 # from .serial import SerialProtocol
 
@@ -17,17 +20,32 @@ logger = Logger(__name__)
 class ProtocolFactory:
     _protocol_classes:dict[ProtocolType,Type[IDeviceProtocol]] = {
         ProtocolType.TCP: TcpProtocol,
-        ProtocolType.MODBUS_TCP: ModbusTcpProtocol,
+        # ProtocolType.MODBUS_TCP: ModbusTcpProtocol,
         # ProtocolType.ModbusRTU: ModbusRtuProtocol,
         # ProtocolType.Serial: SerialProtocol,
-        # ProtocolType.USB: UsbProtocol,
         # 其他协议...
     }
+    def reload_protocol(self, device_id:str)->IDeviceProtocol:
+        device_config = settings.device_configs[device_id]
+        protocol_name = f"{device_config.model}_{device_config.version}".lower()
+        protocol_config = settings.protocol_configs[protocol_name]
+        
+        config_hash = CommandBuilderFactory.generate_config_hash(protocol_config)
+        
+        CommandBuilderFactory().delete(config_hash)
+        ResponseParserFactory().delete(config_hash)
 
-    def create_protocol(self, device_config: DeviceConfig, protocol_config:ProtocolConfig)->IDeviceProtocol:
+        return self.create_protocol(device_id)
+
+    def create_protocol(self, device_id:str)->IDeviceProtocol:
         try:                      
             # 创建协议实例
-            protocol_class = self._protocol_classes.get(protocol_config.protocol_type)
+            device_config = settings.device_configs[device_id]
+            protocol_name = f"{device_config.model}_{device_config.version}".lower()
+            protocol_config = settings.protocol_configs[protocol_name]
+
+            protocol_class = self._protocol_classes[protocol_config.protocol_type]
+
             if not protocol_class:
                 raise ValueError(f"不支持的协议类型: {protocol_config.protocol_type}")
                 

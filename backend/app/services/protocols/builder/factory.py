@@ -7,7 +7,6 @@ from typing import Type
 from ....models import ProtocolConfig
 from ....services.protocols.base.ibuilder import ICommandBuilder
 from .ascii import AsciiCommandBuilder
-from .modbus import ModbusCommandBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,12 @@ class CommandBuilderFactory:
         return cls._builders[config_hash]
     
     @classmethod
+    def delete(cls, config_hash:str) -> None:
+        """删除构建器实例"""
+        if config_hash in cls._builders:
+            del cls._builders[config_hash]
+        
+    @classmethod
     def generate_config_hash(cls, config: ProtocolConfig) -> str:
         """生成配置哈希"""
         return f"{config.name}_{config.version}_{config.protocol_type}"
@@ -40,8 +45,8 @@ class CommandBuilderFactory:
         builder_map: dict[str, Type[ICommandBuilder]] = {
             'tcp': AsciiCommandBuilder,
             'ascii': AsciiCommandBuilder,
-            'modbus_tcp': ModbusCommandBuilder,
-            'modbus_rtu': ModbusCommandBuilder,
+            # 'modbus_tcp': ModbusCommandBuilder,
+            # 'modbus_rtu': ModbusCommandBuilder,
             'serial': AsciiCommandBuilder,
             'usb': AsciiCommandBuilder,
         }

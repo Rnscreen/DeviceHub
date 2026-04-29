@@ -1,4 +1,7 @@
 # backend/app/config.py
+import os
+import sys
+import subprocess
 from typing import Any, Callable, Optional
 import logging
 from pathlib import Path
@@ -6,6 +9,7 @@ from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
 from .device_config import DeviceConfig, DeviceHubConfig
+from .protocol_config import ProtocolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,8 @@ class Settings(BaseSettings):
     _devicehub_config: Optional[DeviceHubConfig] = None
     device_configs: dict[str, DeviceConfig] = Field(
         default_factory=dict, description="设备配置字典")
+    protocol_configs: dict[str, ProtocolConfig] = Field(
+        default_factory=dict, description="协议配置字典")
     
     # 热重载回调函数（不使用下划线前缀以兼容 Pydantic）
     reload_callbacks: list[Callable[[str], None]] = Field(
@@ -207,24 +213,21 @@ class Settings(BaseSettings):
         
         if file_path_obj == self.SYSTEM_CONFIG_PATH:
             logger.info(f"检测到 system.yaml 变化，正在重启...")
-            # 重启应用
-            import os
-            import sys
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            self.restart_app()
             
             
         elif file_path_obj == self.DEVICE_CONFIG_PATH:
             logger.info(f"检测到 devices.yaml 变化，重新加载...")
             self._devicehub_config = None
             self._load_configs()
-            for callback in self.reload_callbacks:
-                try:
-                    callback("device_config_changed")
-                    # 重启poll服务
-                    from ..services import polling_service
-                    polling_service.restart_polling_sync()
-                except Exception as e:
-                    logger.error(f"配置重载回调执行失败: {e}")
+            try:
+                # 重启poll服务
+                # from ..services import polling_service
+                # polling_service.restart_polling_sync()
+                self.restart_app()
+            except Exception as e:
+                logger.error(f"配置重载回调执行失败: {e}")
+                return
             logger.info("✅ devices.yaml 已重新加载")
     
     def enable_hot_reload(self) -> None:
@@ -237,10 +240,9 @@ class Settings(BaseSettings):
             from ..services import file_watcher
                         
             # 监听系统配置文件
-            file_watcher.watch_file(self.SYSTEM_CONFIG_PATH.as_posix(), self._on_config_changed)
-            
-            # 监听设备配置文件
-            file_watcher.watch_file(self.DEVICE_CONFIG_PATH.as_posix(), self._on_config_changed)
+            file_watcher.watch_file([self.SYSTEM_CONFIG_PATH.as_posix(), 
+                                     self.DEVICE_CONFIG_PATH.as_posix()], 
+                                     self._on_config_changed)
             
             self.hot_reload_enabled = True
             logger.info("✅ 配置文件热重载已启用")
@@ -254,5 +256,13 @@ class Settings(BaseSettings):
         """禁用配置文件热重载"""
         self.hot_reload_enabled = False
         logger.info("配置文件热重载已禁用")
+
+    def restart_app(self) -> None:
+        """重启应用"""
+        if os.name == 'nt':  # Windows
+            subprocess.Popen([sys.executable] + sys.argv)
+            sys.exit(0)
+        else:  # Linux/Mac
+            os.execv(sys.executable, [sys.executable] + sys.argv)   
 
 settings = Settings()

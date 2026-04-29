@@ -1,10 +1,16 @@
 import asyncio
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Sequence
 import logging
+
+from ..connetion.tcp import TcpConnection
 
 from ....utils.convert_type import convert_type
 
-from ....models import PollDataType, DataFrame, DataCategory
+from ....models import PollDataType, DataFrame, DataCategory,\
+                   ControlCommands, PollCommands, PollCommand
+
+
+
 from ..base.ihandler import IHandler
 
 class TcpHandler(IHandler):
@@ -19,6 +25,7 @@ class TcpHandler(IHandler):
         self.recv_split = self.protocol_config.protocols.recv_split 
         self.multisend = self.protocol_config.protocols.multisend
         self._lock = asyncio.Lock()
+        self.connection: TcpConnection = self.connection
 
     async def _send_command(self, command: str) -> str:
         """发送命令并接收响应
@@ -30,15 +37,15 @@ class TcpHandler(IHandler):
         async with self._lock:
             if not self.multisend:
                 await self.connection.send(command.encode('utf-8'))
-                result:bytes = await self.connection.read_until(self.recv_terminator) # type:ignore
+                result:bytes = await self.connection.read_until(self.recv_terminator)
             else:
                 result:bytes = await self.connection.send_command(command.encode('utf-8'))
 
-            return result.decode('utf-8', errors='ignore') # type:ignore
+            return result.decode('utf-8', errors='ignore')
 
     async def execute_monitor(
         self, 
-        commands: Sequence[tuple[str, Union[str, list[str]]]]
+        commands: PollCommands
     ) -> DataFrame:
             """执行批量查询命令
             
@@ -58,7 +65,7 @@ class TcpHandler(IHandler):
                 return data_frame
             
             # 构建命令
-            cmd_keys, built_commands = self.builder.build_poll_command(
+            valid_commands, cmd_keys, built_commands = self.builder.build_poll_command(
                 commands
             )
             
@@ -84,50 +91,54 @@ class TcpHandler(IHandler):
                 origin_responses=responses
             )
             # 验证结果并构建DataFrame:
-            for _data_name, channels in commands:
-                
-                pln = self.dataname_to_datatype.get(_data_name,PollDataType.MONITOR_FAST)
+            for cmd in valid_commands:
+                pln = self.dataname_to_datatype.get(cmd.data_name,PollDataType.MONITOR_FAST)
                 layer_name = pln.dt
                 layer = data_frame[layer_name]
-                data_category = DataCategory(layer_name, _data_name)
+                data_category = DataCategory(layer_name, cmd.data_name)
 
-                value_type = self.protocol_config.data[pln][_data_name].type
+                value_type = self.protocol_config.data[pln][cmd.data_name].type
                 result_name = parsed_results[0][0]
 
-                # 验证数据项名称, 如果不匹配则跳出循环,终止构建
-                if result_name != _data_name:
-                    self.logger.warning(f"轮询数据项名称不匹配, 期望: {_data_name}, 实际: {result_name}, 已终止")
-                    return data_frame
-                if isinstance(channels, str):
-                    channels = [channels]
+                # 验证数据项名称, 如果不匹配则跳过该数据项
+                if result_name != cmd.data_name:
+                    self.logger.warning(f"轮询数据项名称不匹配, 期望: {cmd.data_name}, 实际: {result_name}, \n\
+                                        放弃本次轮询")
+                    # 清空socket 
+                    await self.connection.clear()
+                    break
                 
-                # 如果是package数据直接添加到data_category
+                if isinstance(cmd.channel, str):
+                    cmd.channel = [cmd.channel]
+                
+                # 如果是package数据直接添加到data_category中
                 if isinstance(parsed_results[0][1], dict):
                     # 只要 enabled_channels 中的数据
                     for key,value in parsed_results[0][1].items(): #type:ignore
-                        if key in channels:
-                            data_category[key] = convert_type(value, value_type) #type:ignore
+                        if key in cmd.channel:
+                            data_category[key] = convert_type(value, value_type)
                     del parsed_results[0]
-                            
+                    if parsed_results == []:
+                        break
                 # 否则按顺序分发至通道中
                 else:
-                    for channel in channels:
-                        data_category[channel] = convert_type(parsed_results[0][1], value_type) #type:ignore
-                        del parsed_results[0]
-                        if parsed_results == []:
-                            break
-
-                layer.add_category(_data_name, data=data_category)
-
+                    if cmd.channel is not None:
+                        for channel in cmd.channel:
+                            data_category[channel] = convert_type(parsed_results[0][1], value_type) 
+                            del parsed_results[0]
+                            if parsed_results == []:
+                                break
+                                            
+                layer.add_category(cmd.data_name, data=data_category)
                 if parsed_results == []:
-                    break
+                            break
 
             return data_frame
 
     async def execute_control(
         self, 
-        commands: Sequence[tuple[str, Optional[str], str]]
-    ) -> list[bool]:
+        commands: ControlCommands
+    ) -> Sequence[bool]:
         """执行批量控制命令
         
         Args:
@@ -142,16 +153,8 @@ class TcpHandler(IHandler):
         if not commands:
             return []
         
-        formatted_commands: list[tuple[str, str, Any]] = []
-        
-        for control_name, channel, value in commands:
-            if channel is None:
-                channel = "main"
-            
-            formatted_commands.append((control_name, channel, value))
-        
         cmd_keys, built_commands = self.builder.build_control_command(
-            formatted_commands
+            commands
         )
         
         responses: Sequence[tuple[str, str]] = []
@@ -180,7 +183,7 @@ class TcpHandler(IHandler):
                 results.append(False)
         
         if update_keys:
-            update_commands: list[tuple[str, Union[str, list[str]]]] = []
+            update_commands: PollCommands = []
             for update_key in update_keys:
                 if update_key.startswith("set_"):
                     data_name = update_key[4:]
@@ -189,7 +192,7 @@ class TcpHandler(IHandler):
                 
                 channel_group = self.dataname_to_channels.get(data_name, "main")
                 channel = self.enabled_channels.get(channel_group, channel_group)
-                update_commands.append((data_name, channel))
+                update_commands.append(PollCommand(data_name, channel))
             
             if update_commands:
                 try:

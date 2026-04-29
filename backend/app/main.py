@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 # 静态文件目录
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "static"
 
+async def device_components_init():
+    #初始化设备
+    logger.info("初始化设备...")
+    await device_manager.initialize_devices()
+    # 启动轮询服务
+    logger.info("启动轮询服务...")
+    if not polling_service.is_running:
+        await polling_service.start_polling()
+    else:
+        logger.info("轮询服务已在运行")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -30,10 +41,17 @@ async def lifespan(app: FastAPI):
     logger.info(f"启动 {settings.APP_NAME}")
     
     try:
+        # 连接数据库
+        logger.info("连接数据库...")
+        await db_service.connect()
+        
+        # 初始化设备组件
+        await device_components_init()
+        
         # 启动文件监听服务
         logger.info("启动文件监听服务...")
         file_watcher.start()
-        
+
         # 启用配置文件热重载
         logger.info("启用配置文件热重载...")
         settings.enable_hot_reload()
@@ -42,21 +60,6 @@ async def lifespan(app: FastAPI):
         logger.info("启用协议配置文件热重载...")
         device_manager.enable_protocol_hot_reload()
         
-        # 连接数据库
-        logger.info("连接数据库...")
-        await db_service.connect()
-        
-        # 初始化设备
-        logger.info("初始化设备...")
-        await device_manager.initialize_devices()
-        
-        # 启动轮询服务
-        logger.info("启动轮询服务...")
-        if not polling_service.is_running:
-            await polling_service.start_polling()
-        else:
-            logger.info("轮询服务已在运行")
-
         # 将服务实例存储到app.state
         app.state.device_manager = device_manager
         app.state.db_service = db_service
@@ -86,7 +89,6 @@ async def lifespan(app: FastAPI):
         
     except Exception as e:
         logger.error(f"应用关闭时出错: {e}")
-
 
 # 创建FastAPI应用
 app = FastAPI(

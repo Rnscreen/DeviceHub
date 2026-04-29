@@ -15,6 +15,7 @@ class PollingService:
     """数据轮询服务"""
 
     def __init__(self, device_manager: "DeviceManager") -> None:
+        self.loop = asyncio.get_event_loop()
         self.device_manager = device_manager
         self.is_running = False
         self.polling_tasks: dict[str, asyncio.Task[None]] = {}
@@ -32,13 +33,36 @@ class PollingService:
     async def stop_polling(self) -> None:
         """停止轮询服务"""
         self.is_running = False
-
-        for task in self.polling_tasks.values():
-            task.cancel()
-
-        await asyncio.gather(*self.polling_tasks.values(), return_exceptions=True)
-        self.polling_tasks.clear()
-        logger.info("轮询服务已停止")
+        
+        """安全停止所有轮询服务"""
+        if not self.polling_tasks:
+            return
+        
+        tasks = list(self.polling_tasks.values())
+        logger.info(f"停止 {len(tasks)} 个轮询任务")
+        
+        # 取消任务
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        
+        # 等待任务完成
+        try:
+            # 不指定loop参数
+            asyncio.set_event_loop(self.loop)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 记录非取消异常
+            for result in results:
+                if (isinstance(result, Exception) and 
+                    not isinstance(result, asyncio.CancelledError)):
+                    logger.debug(f"任务停止时捕获异常: {type(result).__name__}: {result}")
+                    
+        except Exception as e:
+            logger.error(f"等待任务停止时出错: {e}")
+        finally:
+            self.polling_tasks.clear()
+            logger.info("所有轮询任务已停止")
 
     async def _poll_device_loop(self, device_id: str) -> None:
         """设备轮询循环"""
@@ -95,19 +119,42 @@ class PollingService:
             del self.polling_tasks[device_id]
             logger.info("停止设备轮询: %s", device_id)
 
+    async def clear_device_tasks(self) -> None:
+        """清除所有轮询任务"""
+        for task in self.polling_tasks.values():
+            task.cancel()
+        await asyncio.gather(*self.polling_tasks.values(), return_exceptions=True)
+
+        # 断开所有设备连接
+        for device_id in self.polling_tasks.keys():
+            await self.device_manager.devices[device_id].disconnect()
+            # 从设备管理器中移除设备
+            self.device_manager.devices.pop(device_id)
+            logger.info("设备 %s 已断开连接", device_id)
+        
+        self.polling_tasks.clear()
+        logger.info("所有轮询任务已清除")
+
     async def restart_polling(self) -> None:
         """重启轮询服务"""
+        # 停止轮询服务
         await self.stop_polling()
+
+        # 清除设备轮询任务
+        await self.clear_device_tasks()
+
+        # 重新初始化设备
+        logger.info("初始化设备...")
+        await self.device_manager.initialize_devices()
+
+        # 启用轮询服务
         await self.start_polling()
 
     def restart_polling_sync(self) -> None:
         """同步方式重启轮询服务"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self.restart_polling())
-        finally:
-            loop.close()
+        asyncio.set_event_loop(self.loop)
+        asyncio.run(self.restart_polling())
+
 
     async def stop(self) -> None:
         """停止轮询服务"""

@@ -60,7 +60,7 @@ class TcpConnection(IConnection):
         if self._reader:
             try:
                 await asyncio.wait_for(
-                    self._reader.read(1024),
+                    self._reader.read(4096),
                     timeout=self.timeout
                 )
             except Exception as e:

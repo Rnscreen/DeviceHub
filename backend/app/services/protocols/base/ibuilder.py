@@ -1,8 +1,8 @@
-from typing import Sequence
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Union
 
-from ....models import ProtocolConfig, ControlDefinition, DataDefinition
+from ....models import ProtocolConfig, ControlDefinition, DataDefinition,\
+                        ControlCommands, PollCommands, ModbusChannel
 
 class ICommandBuilder(ABC):
     """命令构建器抽象基类 - 重新设计版本"""
@@ -64,7 +64,7 @@ class ICommandBuilder(ABC):
 
     @abstractmethod
     def build_poll_command(self,
-        origin_commands: Sequence[tuple[str, Union[str,list[str]]]]) -> tuple[list[str], list[Any]]:
+        origin_commands: PollCommands) -> tuple[PollCommands, list[str], list[Any]]:
         """构建轮询命令 - 优先使用批量命令
         
         Args:
@@ -73,6 +73,7 @@ class ICommandBuilder(ABC):
                 - channels: 通道列表或单个通道字符串
             
         Returns:
+            valid_commands: 有效命令元组序列
             cmd_keys: 命令键列表
             final_commands: 发送命令列表
         """
@@ -81,7 +82,7 @@ class ICommandBuilder(ABC):
     @abstractmethod
     def build_control_command(
         self,
-        origin_commands: Sequence[tuple[str, Union[str, list[str]], Any]]
+        origin_commands: ControlCommands
     ) -> tuple[list[str], list[Any]]:
         """构建控制命令
         
@@ -174,16 +175,38 @@ class ICommandBuilder(ABC):
     def _validate_control_value(
         self,
         ctrl_def: ControlDefinition,
-        value: Union[float, int, str]
+        value: Union[float, int, str, bool, None]
     ):
         """验证控制值"""
         if ctrl_def.enum:
-            enum_mapping = self.protocol_config.enums.get(ctrl_def.enum, {})
-            if str(value) not in enum_mapping and value not in enum_mapping.values():
-                raise ValueError(
-                    f"Value {value} not in enum {ctrl_def.enum}. "
-                    f"Valid values: {list(enum_mapping.values())}"
-                )
+            enum_type, enum_name = ctrl_def.enum.split('.')
+            if enum_type == 'channels':
+                enum_group = self.protocol_config.channels.get(enum_name)
+            elif enum_type == 'enums':
+                enum_group = self.protocol_config.enums.get(enum_name)
+            else:
+                raise ValueError(f"Invalid enum type {enum_type} for {ctrl_def.enum}")
+
+            if isinstance(enum_group, str):   
+                raise ValueError(f"This parameter is not needed")
+            elif enum_group is None:
+                raise ValueError(f"Enum {enum_name} not found")
+            elif isinstance(enum_group, list):
+                if str(value) not in enum_group and value not in enum_group:
+                    raise ValueError(
+                        f"Value {value} not in enum {ctrl_def.enum}. "
+                        f"Valid values: {enum_group}"
+                    )
+            elif isinstance(enum_group, ModbusChannel):
+                if str(value) not in enum_group.keys():
+                    raise ValueError(f"This parameter is not needed")
+            else:
+                # if isinstance(enum_group, dict):
+                if str(value) not in enum_group.keys():
+                    raise ValueError(
+                        f"Value {value} not in enum {ctrl_def.enum}. "
+                        f"Valid values: {list(enum_group.values())}"
+                    )
         
         if isinstance(value, (int, float)):
             if ctrl_def.min is not None and value < ctrl_def.min:
@@ -194,19 +217,11 @@ class ICommandBuilder(ABC):
     def _format_control_value(
         self,
         ctrl_def: ControlDefinition,
-        value: Union[float, int, str]
+        value: Union[float, int, str, bool, None]
     ) -> str:
         """格式化控制值"""
-        if ctrl_def.enum:
-            # 如果是枚举值，转换为协议需要的格式
-            enum_mapping = self.protocol_config.enums[ctrl_def.enum]
-            if value in enum_mapping.values():
-                # 反向查找键
-                for k, v in enum_mapping.items():
-                    if v == value:
-                        return k
-            return str(value)
-        
+        if value is None:
+            return ""
         # 数值类型处理
         if ctrl_def.type == 'int':
             return str(int(value))

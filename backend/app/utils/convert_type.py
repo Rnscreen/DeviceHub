@@ -1,5 +1,5 @@
-from typing import Any
-def convert_type(value: Any, target_type: str='str') -> Any:
+from typing import Any, Optional
+def convert_type(value: Any, target_type: Optional[str]='str') -> Any:
     """将值转换为指定的目标类型
     
     Args:
@@ -13,6 +13,8 @@ def convert_type(value: Any, target_type: str='str') -> Any:
         ValueError: 当目标类型不支持或转换失败时
     """
     result:Any = None
+    if target_type is None:
+        target_type = 'str'
     if isinstance(value, str):
         match target_type.lower():
             case "int":

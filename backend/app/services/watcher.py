@@ -5,6 +5,7 @@
 import logging
 import threading
 from pathlib import Path
+import time
 from typing import Callable, Optional
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
@@ -22,7 +23,9 @@ class ConfigFileHandler(FileSystemEventHandler):
         self.callback = callback
         self.debounce_seconds = debounce_seconds
         self._pending_timers: dict[str, threading.Timer] = {}
+        self._last_event_time: dict[str, float] = {}  # 记录上次事件时间
         self._lock = threading.Lock()
+        self._cooldown = 0.1  # 100ms冷却时间，防止同一文件的连续事件
         
     def on_modified(self, event: FileSystemEvent) -> None:
         """文件修改事件"""
@@ -31,21 +34,19 @@ class ConfigFileHandler(FileSystemEventHandler):
             
         file_path = Path(event.src_path)
         if file_path.suffix in ['.yaml', '.yml']:
-            logger.info(f"检测到配置文件变化: {file_path}")
-            
-            task_key = str(file_path)
+            # 检查冷却时间
+            current_time = time.time()
+            file_path_str = str(file_path)
             
             with self._lock:
-                # 取消之前的定时器
-                if task_key in self._pending_timers:
-                    self._pending_timers[task_key].cancel()
-                
-                # 创建新的定时器
-                self._pending_timers[task_key] = threading.Timer(
-                    self.debounce_seconds,
-                    lambda: self._safe_callback(task_key, str(file_path))
-                )
-                self._pending_timers[task_key].start()
+                last_time = self._last_event_time.get(file_path_str, 0)
+                if current_time - last_time < self._cooldown:
+                    # 在冷却时间内，忽略此事件
+                    return
+                self._last_event_time[file_path_str] = current_time
+            
+            logger.info(f"检测到配置文件变化: {file_path}")
+            self._schedule_debounced(file_path_str)
     
     def on_created(self, event: FileSystemEvent) -> None:
         """文件创建事件"""
@@ -55,10 +56,7 @@ class ConfigFileHandler(FileSystemEventHandler):
         file_path = Path(event.src_path)
         if file_path.suffix in ['.yaml', '.yml']:
             logger.info(f"检测到新配置文件: {file_path}")
-            threading.Timer(
-                self.debounce_seconds,
-                lambda: self._safe_callback(str(file_path), str(file_path))
-            ).start()
+            self._schedule_debounced(str(file_path))
     
     def on_deleted(self, event: FileSystemEvent) -> None:
         """文件删除事件"""
@@ -68,22 +66,43 @@ class ConfigFileHandler(FileSystemEventHandler):
         file_path = Path(event.src_path)
         if file_path.suffix in ['.yaml', '.yml']:
             logger.info(f"检测到配置文件删除: {file_path}")
-            threading.Timer(
-                self.debounce_seconds,
-                lambda: self._safe_callback(str(file_path), str(file_path))
-            ).start()
+            self._schedule_debounced(str(file_path))
     
-    def _safe_callback(self, task_key: str, file_path: str) -> None:
-        """线程安全的回调执行"""
-        with self._lock:
-            if task_key in self._pending_timers:
-                del self._pending_timers[task_key]
+    def _schedule_debounced(self, file_path: str) -> None:
+        """统一防抖调度"""
+        task_key = file_path
         
-        try:
-            self.callback(file_path)
-        except Exception as e:
-            logger.error(f"处理配置文件变化失败 {file_path}: {e}")
-
+        with self._lock:
+            # 取消之前的定时器
+            if task_key in self._pending_timers:
+                try:
+                    self._pending_timers[task_key].cancel()
+                except:
+                    pass
+                finally:
+                    # 确保从字典中移除
+                    self._pending_timers.pop(task_key, None)
+            
+            # 创建新的定时器
+            def callback_wrapper():
+                # 从字典中移除定时器引用
+                with self._lock:
+                    self._pending_timers.pop(task_key, None)
+                
+                # 重置冷却时间
+                with self._lock:
+                    self._last_event_time.pop(task_key, None)
+                
+                # 执行回调
+                try:
+                    self.callback(file_path)
+                except Exception as e:
+                    logger.error(f"处理配置文件变化失败 {file_path}: {e}")
+            
+            timer = threading.Timer(self.debounce_seconds, callback_wrapper)
+            timer.daemon = True
+            self._pending_timers[task_key] = timer
+            timer.start()
 
 class FileWatcher:
     """文件监听服务"""
@@ -93,21 +112,33 @@ class FileWatcher:
         self.handlers: dict[str, ConfigFileHandler] = {}
         self._running = False
         
-    def watch_file(self, file_path: str, callback: Callable[[str], None], 
+    def watch_file(self, files_path: str|list[str], callback: Callable[[str], None], 
                    debounce_seconds: float = 0.5) -> None:
         """监听单个文件"""
-        path = Path(file_path)
-        if not path.exists():
-            logger.warning(f"监听文件不存在: {file_path}")
-            return
-            
-        watch_dir = str(path.parent)
-        handler = ConfigFileHandler(callback, debounce_seconds)
+        if isinstance(files_path, str):
+            files_path = [files_path]
+
+        file_group: dict[str, list[str]] = {}
+        for path_str in files_path:
+            path = Path(path_str)
+            if not path.exists():
+                logger.warning(f"监听文件不存在: {path_str}")
+                continue
+            file_dir = str(path.parent)
+            file_name = path.name
+            if file_dir not in file_group:
+                file_group[file_dir] = []
+            file_group[file_dir].append(file_name) 
+
+        for file_dir,files in file_group.items():
+            watch_dir = file_dir
+            handler = ConfigFileHandler(callback, debounce_seconds)
         
-        if self.observer:
-            self.observer.schedule(handler, watch_dir, recursive=False) #type: ignore
-            self.handlers[file_path] = handler
-            logger.info(f"开始监听文件: {file_path}")
+            if self.observer:
+                self.observer.schedule(handler, watch_dir, recursive=False) #type: ignore
+                for file_name in files:
+                    self.handlers[file_name] = handler
+                    logger.info(f"开始监听文件: {file_name}")   
     
     def watch_directory(self, directory: str, callback: Callable[[str], None],
                        debounce_seconds: float = 0.5) -> None:

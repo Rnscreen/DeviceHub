@@ -26,16 +26,22 @@ class ResponseParserFactory:
         return cls._parsers[config_hash]
     
     @classmethod
+    def delete(cls, config_hash:str) -> None:
+        """删除解析器实例"""
+        if config_hash in cls._parsers:
+            del cls._parsers[config_hash]
+
+    @classmethod
     def _select_parser_class(cls, protocol_type: str) -> Type[IResponseParser]:
         """根据协议类型选择解析器类"""
         from . import (
             AsciiResponseParser,
-            ModbusResponseParser
+            # ModbusResponseParser
         )
         
         parser_map:dict[str, Type[IResponseParser]] = {
             'tcp': AsciiResponseParser,
-            'modbus_tcp': ModbusResponseParser,
-            'modbus_rtu': AsciiResponseParser
+            # 'modbus_tcp': ModbusResponseParser,
+            # 'modbus_rtu': AsciiResponseParser
         }
         return parser_map.get(protocol_type, AsciiResponseParser)

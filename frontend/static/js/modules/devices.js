@@ -449,7 +449,7 @@ export class DeviceManager {
             const data = await response.json();
             
             // 存储功能到缓存
-            this.deviceFunctions.set(deviceId, data.functions);
+            this.deviceFunctions.set(deviceId, data);
             this.uiManager.addLog(`成功加载设备 ${deviceId} 的 ${Object.keys(data.functions).length} 个功能`, 'success');
             
         } catch (error) {
@@ -460,7 +460,8 @@ export class DeviceManager {
 
     // 更新指令选项
     getDeviceCommandOptions(deviceId) {
-        const functions = this.deviceFunctions.get(deviceId);
+        const funCfg = this.deviceFunctions.get(deviceId);
+        const functions = funCfg.functions;
         
         if (!functions) {
             this.uiManager.addLog(`未找到设备 ${deviceId} 的功能列表`,'warning');

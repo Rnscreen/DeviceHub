@@ -1,7 +1,8 @@
-from typing import Optional, Any, Sequence, Union
+from typing import Optional, Any
 import logging
 import re
-from ....models import ProtocolConfig, ProtocolType, ControlDefinition
+from ....models import ProtocolConfig, ProtocolType, ControlDefinition,\
+                         PollCommands, ControlCommands
 from ..base.ibuilder import ICommandBuilder
 
 class AsciiCommandBuilder(ICommandBuilder):
@@ -74,8 +75,8 @@ class AsciiCommandBuilder(ICommandBuilder):
 
     def build_poll_command(
         self,
-        origin_commands: Sequence[tuple[str, Union[str,list[str]]]]
-    ) -> tuple[list[str], list[str]]:
+        origin_commands: PollCommands
+    ) -> tuple[PollCommands,list[str],list[Any]]:
         """
         根据原始命令元组序列构建轮询命令列表
         origin_commands 为 一个元组序列，每个元组包含数据项名称和通道列表或单个通道字符串:
@@ -84,28 +85,34 @@ class AsciiCommandBuilder(ICommandBuilder):
         """
         commands: list[str] = []
         cmd_keys: list[str] = []
+        valid_commands: PollCommands = []
                 
-        for data_name, channels in origin_commands:
-            try:
-                cmd_template = self.protocol_config.command.get_command(data_name)
-                cmd_key = self.protocol_config.command.get_cmd_key(data_name)
-            except ValueError:
-                self.logger.warning(f"No command template for {data_name}, skipping")
+        for cmd in origin_commands:
+            if cmd.channel is None:
                 continue
             
+            try:
+                cmd_template = self.protocol_config.command.get_command(cmd.data_name)
+                cmd_key = self.protocol_config.command.get_cmd_key(cmd.data_name)
+                valid_commands.append(cmd)
+            except ValueError:
+                self.logger.warning(f"No command template for {cmd.data_name}, skipping")
+                continue
+            
+            # 如果是 get_all_ 命令, 使用 main 通道
             if 'all' in cmd_key:
                 formatted_cmd = self._format_command(cmd_template, channel='main')
                 commands.append(formatted_cmd)
-                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{data_name}")
-            elif isinstance(channels, str):
-                formatted_cmd = self._format_command(cmd_template, channel=channels)
+                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{cmd.data_name}")
+            if isinstance(cmd.channel, str):
+                formatted_cmd = self._format_command(cmd_template, channel=cmd.channel)
                 commands.append(formatted_cmd)
-                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{data_name}")
+                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{cmd.data_name}")
             else:
-                for ch in channels:
+                for ch in cmd.channel:
                     formatted_cmd = self._format_command(cmd_template, channel=ch)
                     commands.append(formatted_cmd)
-                    cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{data_name}")
+                    cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{cmd.data_name}")
             
         
         final_commands: list[str] = []
@@ -114,11 +121,11 @@ class AsciiCommandBuilder(ICommandBuilder):
             final_cmd = self._apply_send_format(send_format, cmd)
             final_commands.append(final_cmd)
         
-        return cmd_keys, final_commands
+        return valid_commands, cmd_keys, final_commands
 
     def build_control_command(
         self,
-        origin_commands: Sequence[tuple[str, Union[str, list[str]], Any]]
+        origin_commands: ControlCommands
     ) -> tuple[list[str], list[str]]:
         """
         构建控制命令
@@ -136,47 +143,39 @@ class AsciiCommandBuilder(ICommandBuilder):
         commands: list[str] = []
         cmd_keys: list[str] = []
         
-        for control_name, channels, value in origin_commands:
+        for cmd in origin_commands:
             try:
-                cmd_template = self.protocol_config.command.get_control_command(control_name)
+                cmd_template = self.protocol_config.command.get_control_command(cmd.control_name)
                 if not cmd_template:
-                    raise ValueError(f"No control command template for {control_name}")
-                cmd_key = f"set_{control_name}"
+                    raise ValueError(f"No control command template for {cmd.control_name}")
+                cmd_key = f"set_{cmd.control_name}"
             except ValueError:
-                self.logger.warning(f"No control command template for {control_name}, skipping")
+                self.logger.warning(f"No control command template for {cmd.control_name}, skipping")
                 continue
             
-            ctrl_def = self._get_control_definition(control_name)
+            ctrl_def = self._get_control_definition(cmd.control_name)
             
             try:
-                self._validate_control_value(ctrl_def, value)
+                self._validate_control_value(ctrl_def, cmd.value)
             except ValueError as e:
-                self.logger.warning(f"Control value validation failed for {control_name}: {e}")
+                self.logger.warning(f"Control value validation failed for {cmd.control_name}: {e}")
                 continue
             
-            formatted_value = self._format_control_value(ctrl_def, value)
+            formatted_value = self._format_control_value(ctrl_def, cmd.value)
             
             if 'all' in cmd_key:
                 formatted_cmd = self._format_command(cmd_template, channel='main')
                 commands.append(formatted_cmd)
-                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{control_name}")
-            elif isinstance(channels, str):
+                cmd_keys.append(cmd_key if 'default' not in cmd_key else f"get_{cmd.control_name}")
+            else:
+                #if isinstance(cmd.channel, str):
                 formatted_cmd = self._format_command(
                     cmd_template, 
-                    channel=channels, 
+                    channel=cmd.channel, 
                     value=formatted_value
                 )
                 commands.append(formatted_cmd)
                 cmd_keys.append(cmd_key)
-            else:
-                for ch in channels:
-                    formatted_cmd = self._format_command(
-                        cmd_template, 
-                        channel=ch, 
-                        value=formatted_value
-                    )
-                    commands.append(formatted_cmd)
-                    cmd_keys.append(cmd_key)
         
         final_commands: list[str] = []
         for cmd in commands:

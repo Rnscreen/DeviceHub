@@ -1,0 +1,137 @@
+# 基于 protocol_v1.0.yaml 模板，为 PUMP_mock 填充
+name: "PUMP_mock"
+version: "1.0"
+device_type: "vacuum_pump"
+
+protocol_type: 'tcp'
+
+# 2. 通道定义:
+channels:
+  main: "main"  # 真空泵通常为单一设备，一个主通道即可
+  CH: []
+
+# 3. 枚举定义
+enums:
+  pump_status:
+    "stopped": "Stopped"
+    "running": "Running"
+    "vent": "Venting"
+  mode_value:
+    "1": "RUN"
+    "0": "STOP"
+    "-1": "VENT"
+
+# 4. 数据结构定义
+data:
+  monitor_fast:
+    pressure:
+      description: '读取腔体压力 (Pa)'
+      channel: main
+      type: float
+    power:
+      description: '读取泵运行功率 (W)'
+      channel: main
+      type: float
+  status:
+    mode:
+      description: "泵当前模式"
+      channel: main
+  info:
+    mode:
+      description: "泵当前模式"
+      channel: main
+
+# 5. 控制器定义
+controls:
+  mode:
+    description: '设置泵运行模式 (stop/run/vent)'
+    channel: main
+    type: enum
+    enum: enums.mode_value
+  power:
+    description: '设置泵功率 (W)'
+    channel: main
+    type: float
+  run:
+    description: '启动泵'
+    channel: main
+    type: None
+  stop:
+    description: '停止泵'
+    channel: main
+    type: None
+  vent:
+    description: '破真空'
+    channel: main
+    type: None
+
+# 6. 通信协议格式
+protocols:
+  multisend: False
+  send: "{command}"
+  response: "{response_data}"
+  send_terminator: "\r\n"
+  recv_terminator: "\r\n"
+
+# 7. 命令定义(send)
+command:
+  # 查询命令
+  get_pressure: "?PRESSURE"
+  get_power: "?POWER"
+  set_power: "!POWER {value}"
+  get_mode: "?MODE"
+  set_mode: "!MODE {value}"
+  set_stop: "!MODE 0"
+  set_run: "!MODE 1"
+  set_vent: "!MODE -1"
+
+# 8. 解析定义(response)
+parse:
+  get_pressure:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  get_power:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  set_power:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "power: ([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  get_mode:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "mode:\\s*(\\w+)"
+    result: "vars[0]" # 返回 "stopped", "running", "vent"
+  set_mode:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "pump_status:\\s*(\\w+)"
+    result: "vars[0]"
+  set_run:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "pump_status:\\s*(\\w+)"
+    result: "vars[0]"
+  set_stop:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "pump_status:\\s*(\\w+)"
+    result: "vars[0]"
+  set_vent:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "pump_status:\\s*(\\w+)"
+    result: "vars[0]"

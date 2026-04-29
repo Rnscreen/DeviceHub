@@ -14,6 +14,9 @@
             <div class="logo">
                 <i class="fas fa-industry"></i>
                 <h1>设备面板</h1>
+                <a href="/static/page/history.html" target="_blank" rel="noopener noreferrer">
+                        <span>点我查看历史数据</span>
+                </a>
             </div>
             <div class="status-indicator">
                 <div class="connection-status">
@@ -93,7 +96,7 @@
                         <i class="fas fa-paper-plane"></i> 发送控制指令
                     </button>
                     
-                    <div class="form-group">
+                    <!-- <div class="form-group">
                         <label>批量指令 (JSON格式)</label>
                         <textarea id="batchCommands" rows="6" placeholder='例如: [
   {"device": "tc1", "command": "SetTemperature", "value": 25.0},
@@ -103,7 +106,7 @@
                     
                     <button id="sendBatchBtn" class="btn btn-secondary">
                         <i class="fas fa-play-circle"></i> 执行批量指令
-                    </button>
+                    </button> -->
                 </div>
                 
                 <div class="logs" id="logPanel">

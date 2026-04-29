@@ -1,0 +1,145 @@
+# 基于 protocol_v1.0.yaml 模板，为 TC_mock 填充
+# 1. 基本定义
+name: "TC_mock"
+version: "1.0"
+device_type: "temperature_controller"
+
+protocol_type: 'tcp' # 与 communication.protocol 对应
+
+# 2. 通道定义:
+channels:
+  main: "main"  # 主通道，用于无特定通道的命令
+  CH: ["A", "B"] # 定义A，B两个通道的列表，用于批量操作
+
+# 3. 枚举定义
+enums:
+  status_label:
+    "-1": "Stopped"
+    "0": "Manual"
+    "1": "PID"
+  mode_value:
+    "-1": "stop"
+    "0": "manual"
+    "1": "pid"
+
+# 4. 数据结构定义
+data:
+  # 监视器 (高频) - 温度和功率变化较快
+  monitor_fast:
+    temperature:
+      description: '读取通道温度'
+      channel: CH
+      type: float
+    power:
+      description: '读取通道加热功率'
+      channel: CH
+      type: float
+    setpoint:
+      description: "获取温度设定点"
+      channel: CH
+      type: float
+  # 状态监视
+  status:
+    mode:
+      description: "读设备运行模式"
+      channel: main
+      type: str
+  info:
+    mode:
+      description: "读设备运行模式"
+      channel: main
+      type: str
+
+# 5. 控制器定义
+controls:
+  setpoint:
+    description: '设置温度设定点'
+    channel: CH
+    type: float
+  power:
+    description: '直接设置加热功率(手动模式)'
+    channel: CH
+    type: float
+  mode:
+    description: '设置运行模式'
+    channel: main
+    type: enum
+    enum: enums.mode_value
+  stop:
+    description: "停止设备运行"
+    channel: main
+    type: None
+  start:
+    description: "启动设备运行"
+    channel: main
+    type: None
+  clear:
+    description: "清除PID参数缓存"
+    channel: main
+    type: None
+
+# 6. 通信协议格式
+protocols:
+  multisend: False  # 模拟器命令简单，单条发送即可
+  send: "{command}"
+  response: "{response_data}"
+  send_terminator: "\r\n"
+  recv_terminator: "\r\n"
+
+# 7. 命令定义(send) - 映射 TC_mock.yaml 中的 commands
+command:
+  # 查询命令
+  get_temperature: "?TEMP {channel}"  # 例如 ?TEMP A
+  get_power: "?PWR {channel}"         # 例如 ?PWR A
+  get_setpoint: "?SP {channel}"       # 例如 ?SP A
+  get_mode: "?MODE"
+  # 控制命令
+  set_setpoint: "!SP {channel} {value}"
+  set_power: "!PWR {channel} {value}"
+  set_mode: "!MODE {value}"
+  set_stop: "!STOP"
+  set_start: "!START" 
+  set_clear: "!CLEAR"
+
+# 8. 解析定义(response) - 根据模拟器返回格式设计
+parse:
+  # 解析温度、功率、设定点等数值响应
+  get_temperature:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  get_power:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  get_setpoint:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+  # 解析模式，返回枚举值
+  get_mode:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "(-?\\d+)"
+    result: "vars[0]" 
+
+  set_setpoint:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "setpoint\\w*:\\s*([+-]?\\d+\\.?\\d*)"
+    result: "vars[0]"
+
+  set_mode:
+    steps:
+      - method: "regex"
+        params:
+          pattern: "mode:\\s*(-?\\d+)"
+    result: "vars[0]"

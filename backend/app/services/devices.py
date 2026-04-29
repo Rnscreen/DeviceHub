@@ -2,7 +2,6 @@
 """
 设备管理器
 """
-from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Any
 
@@ -12,7 +11,7 @@ from datetime import datetime, timezone
 
 from ..models.data_point import DataFrame
 from ..models.device_config import DeviceConfig
-from ..models.protocol_config import ProtocolConfig
+from ..models.protocol_config import ProtocolConfig, BatchCommands, PollCommand, ControlCommand, what_command
 from .protocols import IDeviceProtocol, protocol_factory
 
 from ..models import settings
@@ -34,22 +33,26 @@ class DeviceManager:
     def device_configs(self) -> dict[str, DeviceConfig]:
         """设备配置字典"""
         return settings.device_configs
+    
+    @property
+    def protocol_configs(self) -> dict[str, ProtocolConfig]:
+        """协议配置字典"""
+        return settings.protocol_configs
 
     def __init__(self, db_service: "SQLiteService | None" = None, ws_service: "WebSocketManager | None" = None) -> None:
         self.db_service = db_service
         self.ws_service = ws_service
+        self.loop = asyncio.get_event_loop()
         self.devices: dict[str, IDeviceProtocol] = {}
         
         # 运行时状态
         self.last_poll_times: dict[str, datetime] = {}
         self.device_status: dict[str, dict[str, datetime | str | bool | None]] = {}
         
-        # 协议配置缓存
-        self.protocol_configs: dict[str, ProtocolConfig] = {}
-        
         # 热重载状态
         self.hot_reload_enabled: bool = False
 
+        self.device_functions: dict[str, dict[str, object]] = {}
         # 缓存设备函数
         """格式为
         {
@@ -66,7 +69,6 @@ class DeviceManager:
                 "is_async": True
         }
         """
-        self.device_functions: dict[str, dict[str, object]] = {}
 
     def _load_protocol_config(self, protocol_name: str) -> ProtocolConfig | None:
         """加载协议配置"""
@@ -114,7 +116,7 @@ class DeviceManager:
                 if device_id in self.devices:
                     continue
 
-                device: IDeviceProtocol = protocol_factory.create_protocol(device_config, protocol_config)
+                device: IDeviceProtocol = protocol_factory.create_protocol(device_id)
                 self.devices[device_id] = device
                 
                 # 初始化状态
@@ -165,7 +167,7 @@ class DeviceManager:
             if device_id in self.devices:
                 return False
 
-            device: IDeviceProtocol = protocol_factory.create_protocol(device_config, protocol_config)
+            device: IDeviceProtocol = protocol_factory.create_protocol(device_id)
             self.devices[device_id] = device
             
             self.device_configs[device_id] = device_config
@@ -303,10 +305,10 @@ class DeviceManager:
         """获取所有设备配置"""
         return self.device_configs.copy()
 
-    def remove_device(self, device_id: str) -> bool:
+    async def remove_device(self, device_id: str) -> bool:
         """移除设备"""
         if device_id in self.devices:
-            asyncio.create_task(self.disconnect_device(device_id))
+            await self.disconnect_device(device_id)
             del self.devices[device_id]
             del self.device_configs[device_id]
             del self.device_status[device_id]
@@ -315,12 +317,17 @@ class DeviceManager:
         return False
 
     def build_command(self, device_id: str, command: str, params: Optional[dict[str, Any]] = None
-                    )-> tuple[str, Optional[str], Optional[str]]:
+                    )-> PollCommand|ControlCommand:
         """构建设备命令"""
-        
-        dataname=command.split('_')[1]
+        # command格式固定为 get_xxx or set_xxx, 为避免xxx包含下划线，不使用_分隔, 而是切片获取xxx部分
+        dataname=command[4:]
         channel = params.get("channel") if params else None
-        value = params.get("value") if params else None
+
+        # 区分轮询命令和控制命令
+        if command.startswith("get_"):
+            value = 'get_only'
+        else:
+            value = params.get("value") if params else None
 
         # 获取设备协议
         device = self.get_device(device_id)
@@ -331,26 +338,31 @@ class DeviceManager:
         # 根据dataname从protocol_config.data中查找polldatatype
         for data_dict in protocol_config.data.values():
             if dataname in data_dict:
+                # 找到数据项
                 break
         else:
-            raise ValueError(f"设备 {device_id} 数据项 {dataname} 不存在")
+            if dataname in protocol_config.controls:
+                # 找到控制项
+                pass
+            else:
+                raise ValueError(f"设备 {device_id} 数据项或控制项 {dataname} 均不存在")
         
-        result:tuple[str, Optional[str], Optional[str]]=(dataname, channel, value)
+        result = what_command(dataname, channel, value)
 
         return result
 
     async def execute_device_command(self, 
                                     device_id: str,
-                                    commands: Sequence[tuple[str, Optional[str], Optional[str]]]
+                                    commands: BatchCommands
                                     ) -> list[dict[str, Any]]|None:
         """执行设备命令（支持单个或批量命令）
         
         Args:
             device_id: 设备ID
-            commands: 命令列表或单个命令，格式为 (data_name, channel, value)
+            commands: 命令列表或单个命令，格式为 data_name, channel, value
                 - data_name: 数据项名称
                 - channel: 通道名称（可选）
-                - value: 要设置的值（可选，用于控制命令）
+                - value: 要设置的值 只能在控制命令中使用
         
         Returns:
             DataFrame: 执行结果, 如果设备不存在则返回None
@@ -376,13 +388,6 @@ class DeviceManager:
                             logger.error("存储设备 %s 数据失败: %s", device_id, e)
 
                     results_json.append(result.to_flat_dict())
-                    
-                    # 广播到WebSocket 暂不启用（前端未适配，会导致数据闪烁）
-                    # if self.ws_service:
-                    #     try:
-                    #         await self.ws_service.send_device_update(device_id=device_id, data=result)
-                    #     except Exception as e:
-                    #         logger.error("向WebSocket广播设备 %s 数据失败: %s", device_id, e)
                 else:
                     results_json.append({"success":result})
             return results_json
@@ -413,16 +418,21 @@ class DeviceManager:
         for data_cfg in protocol.data.values():
             for field, field_cfg in data_cfg.items():
                 func_name = f"get_{field}"
-                if method_config := self._build_method_config(protocol, func_name, field_cfg.description, field_cfg.channel_group, enabled_channels, True,None):
+                if method_config := self._build_method_config(protocol, func_name, field_cfg.description, 
+                                                              field_cfg.channel_group, enabled_channels, 
+                                                              True, "str", None):
                     methods[func_name] = method_config
         
         # 处理控制设置方法
         for field, field_cfg in protocol.controls.items():
             func_name = f"set_{field}"
 
-            enum_input: str|None = field_cfg.type or field_cfg.enum
+            type_input = field_cfg.type or "str"
+            enum_input: str|None = field_cfg.enum
 
-            if method_config := self._build_method_config(protocol, func_name, field_cfg.description, field_cfg.channel_group, enabled_channels, False, enum_input):
+            if method_config := self._build_method_config(protocol, func_name, field_cfg.description, 
+                                                          field_cfg.channel_group, enabled_channels,
+                                                          False, type_input, enum_input):
                 methods[func_name] = method_config
 
         result: dict[str, object] = {
@@ -439,7 +449,8 @@ class DeviceManager:
         return result
 
     def _build_method_config(self, protocol: ProtocolConfig, func_name: str, description: str, channel: str,
-                           enabled_channels: dict[str, list[str]], is_get: bool, enum_input: str | None = None) -> dict[str, object] | None:
+                           enabled_channels: dict[str, list[str]], is_get: bool, 
+                           type_input: str,  enum_input: str | None = None) -> dict[str, object] | None:
         """构建方法配置"""
         params: list[dict[str, object]] = []
         channel_config = protocol.channels.get(channel)
@@ -450,37 +461,53 @@ class DeviceManager:
             if not isinstance(channel_options, str):
                 param: dict[str, object] = {
                     "name": "channel",
-                    "type": "str",
+                    "type": type_input,
                     "default": None,
                     "required": True
                 }
                 
                 match channel_options:
                     case list():
-                        param["options"] = channel_options
+                        param["options"] = {channel: f"CH {channel}" for channel in channel_options}
 
                 params.append(param)
         
         # 处理设置方法的数值参数
-        if not is_get and enum_input:
-            param = {
-                "name": "value",
-                "type": "str", 
-                "default": None,
-                "required": True
-            }
-            
-            match enum_input.split('.'):
-                case ["enums", enum_name]:
-                    if enum_dict := protocol.enums.get(enum_name):
-                        param["options"] = list(enum_dict.keys())
-                case ["channel", ref_channel]:
-                    if ref_options := enabled_channels.get(ref_channel):
-                        match ref_options:
-                            case list():
-                                param["options"] = ref_options
-                case _:
-                    pass
+        if not is_get:
+            if type_input == "None":
+                param = {
+                    "name": "value",
+                    "type": None, 
+                    "default": None,
+                    "required": False
+                }
+            elif type_input == "enum" and enum_input:
+                param = {
+                    "name": "value",
+                    "type": "enum", 
+                    "default": None,
+                    "required": True
+                }
+                
+                match enum_input.split('.'):
+                    case ["enums", enum_name]:
+                        if enum_dict := protocol.enums.get(enum_name, {}):
+                            param["options"] = enum_dict
+
+                    case ["channels", ref_channel]:
+                        if ref_options := enabled_channels.get(ref_channel):
+                            match ref_options:
+                                case list():
+                                    param["options"] = {channel: f"CH {channel}" for channel in ref_options}
+                    case _:
+                        pass
+            else:
+                param = {
+                    "name": "value",
+                    "type": type_input, 
+                    "default": None,
+                    "required": True
+                }
 
             params.append(param)
 
@@ -489,17 +516,33 @@ class DeviceManager:
             "doc": description,
             "params": params,
             "is_get": is_get,
-            "is_async": True
+            "is_async": False # 从缓存读取，可以同步返回
         } if params or is_get else None
     
     def _on_protocol_config_changed(self, file_path: str) -> None:
+        """协议配置文件变化时的处理函数（同步版本，在watchdog线程调用）"""
+        # 将异步处理调度到主事件循环
+        future = asyncio.run_coroutine_threadsafe(#type:ignore
+            self._async_on_protocol_config_changed(file_path),
+            self.loop
+        ) 
+        # 可以选择等待结果，但只是触发更新
+        # try:
+        #     future.result(timeout=10)  # 最多等待10秒
+        # except TimeoutError:
+        #     logger.error(f"处理配置文件 {file_path} 超时")
+        # except Exception as e:
+        #     logger.error(f"处理配置文件 {file_path} 失败: {e}")
+    
+    async def _async_on_protocol_config_changed(self, file_path: str) -> None:
+        """异步处理函数（在主事件循环执行）"""
         """协议配置文件变化时的处理函数
         
         Args:
             file_path: 变化的文件路径
         """
         file_path_obj = Path(file_path)
-        protocol_name = file_path_obj.stem
+        protocol_name = file_path_obj.stem.lower()
         
         logger.info(f"检测到协议配置变化: {protocol_name}")
         
@@ -521,9 +564,17 @@ class DeviceManager:
                 
                 # 重新加载协议配置
                 try:
+                    # 前往poll所在线程，断开连接
+                    await device.disconnect()
+                    del self.devices[device_id]
+
+                    device_config = self.device_configs.get(device_id)
                     newprotocol_config = self._load_protocol_config(protocol_name)
-                    if newprotocol_config:
-                        device.protocol_config = newprotocol_config
+                    if device_config and newprotocol_config:
+                        # 创建新的协议实例
+                        device: IDeviceProtocol = protocol_factory.reload_protocol(device_id)
+                        self.devices[device_id] = device
+                        
                         logger.info(f"设备 {device_id} 的协议配置已更新")
                 except Exception as e:
                     logger.error(f"重新加载设备 {device_id} 的协议配置失败: {e}")
@@ -549,7 +600,7 @@ class DeviceManager:
             logger.info("✅ 协议配置文件热重载已启用")
             
         except ImportError:
-            logger.error("无法导入 file_watcher，热重载功能不可用")
+            logger.error("无法导入 file_watcher, 热重载功能不可用")
         except Exception as e:
             logger.error(f"启用协议热重载失败: {e}")
     
@@ -557,59 +608,3 @@ class DeviceManager:
         """禁用协议配置文件热重载"""
         self.hot_reload_enabled = False
         logger.info("协议配置文件热重载已禁用")
-    
-    def clear_protocol_cache(self, protocol_name: str | None = None) -> None:
-        """清除协议配置缓存
-        
-        Args:
-            protocol_name: 协议名称，如果为 None 则清除所有缓存
-        """
-        if protocol_name:
-            if protocol_name in self.protocol_configs:
-                del self.protocol_configs[protocol_name]
-                logger.info(f"已清除协议 {protocol_name} 的缓存")
-        else:
-            self.protocol_configs.clear()
-            logger.info("已清除所有协议配置缓存")
-    
-    def reloadprotocol_config(self, protocol_name: str) -> bool:
-        """重新加载指定的协议配置
-        
-        Args:
-            protocol_name: 协议名称
-            
-        Returns:
-            是否成功重新加载
-        """
-        try:
-            # 清除缓存
-            if protocol_name in self.protocol_configs:
-                del self.protocol_configs[protocol_name]
-            
-            # 重新加载
-            protocol_config = self._load_protocol_config(protocol_name)
-            
-            if not protocol_config:
-                logger.error(f"重新加载协议配置失败: {protocol_name}")
-                return False
-            
-            # 更新使用该协议的设备
-            for device_id, device in self.devices.items():
-                device_protocol_name = (
-                    f"{device.device_config.model}_{device.device_config.version}".lower()
-                    if device.device_config.version
-                    else device.device_config.model.lower()
-                )
-                
-                if device_protocol_name == protocol_name:
-                    device.protocol_config = protocol_config
-                    if device_id in self.device_functions:
-                        del self.device_functions[device_id]
-                    logger.info(f"设备 {device_id} 的协议配置已更新")
-            
-            logger.info(f"✅ 协议配置 {protocol_name} 已重新加载")
-            return True
-            
-        except Exception as e:
-            logger.error(f"重新加载协议配置 {protocol_name} 失败: {e}")
-            return False
