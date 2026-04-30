@@ -1,5 +1,6 @@
 # DeviceHub 工业设备监控网关
 基于 Python FastAPI 的工业设备数据采集、监控和控制网关服务。支持通过 TCP 协议与多种工业设备（温控仪、压力计、流量计、泵等）通信，提供 WebSocket 实时数据推送和 HTTP 历史数据查询接口。
+[->bilibili演示视频](https://b23.tv/BV1Sn9eBLEzF)
 
 ## 特性
 1. 架构设计

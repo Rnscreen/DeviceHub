@@ -1,5 +1,10 @@
 # CHANGELOG
 <!--  -->
+## Unreleased
+Date: 2026-04-30
+### Added:
+1. frontend: 在history.html中增加且默认启用了曲线的log10功能, 对于数值范围较大的数据, 可以保留更多的细节
+
 ## V0.1.2
 Date: 2026-04-29
 ### Added:

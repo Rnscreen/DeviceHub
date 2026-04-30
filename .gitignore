@@ -2,7 +2,7 @@
 _notes/
 dwsync.xml
 
-# 私有配置
+# YAML files
 *.yaml
 *.yml
 

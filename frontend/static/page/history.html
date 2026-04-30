@@ -87,6 +87,21 @@
         }
         .chart-info { font-size: 0.9rem; color: #7f8c8d; }
         .chart-info strong { color: #333; }
+        .scale-toggle {
+            display: flex; align-items: center; gap: 0;
+            border: 1px solid #ddd; border-radius: 6px; overflow: hidden;
+            font-size: 0.85rem;
+        }
+        .scale-toggle button {
+            padding: 6px 14px; border: none; background: #fff; cursor: pointer;
+            color: #555; transition: all 0.2s;
+        }
+        .scale-toggle button.active {
+            background: #4a6cf7; color: #fff;
+        }
+        .scale-toggle button:not(:last-child) {
+            border-right: 1px solid #ddd;
+        }
 
         .chart-area { flex: 1; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
         .chart-container { width: 100%; flex: 1; min-height: 300px; }
@@ -200,7 +215,13 @@
         <div class="main-panel">
             <div class="chart-toolbar">
                 <div class="chart-info" id="chartInfo">请选择设备和数据点后查询</div>
-                <div id="recordCount" style="font-size: 0.85rem; color: #999;"></div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="scale-toggle" id="scaleToggle">
+                        <button data-scale="linear">Linear</button>
+                        <button class="active" data-scale="log10">Log10</button>
+                    </div>
+                    <div id="recordCount" style="font-size: 0.85rem; color: #999;"></div>
+                </div>
             </div>
             <div class="chart-area" style="position: relative;">
                 <div class="empty-state" id="emptyState">
@@ -220,422 +241,572 @@
         </div>
     </div>
 
-    <script>
-    (function() {
-        const API = `${window.location.protocol}//${window.location.host}/api/v1`;
-        let chartInstance = null;
-        let currentData = null;
-        let currentParams = {};
-        let fieldTypesMap = {};
+    // ... 之前的所有HTML和CSS保持不变 ...
 
-        const deviceSelect = document.getElementById('deviceSelect');
-        const fieldsContainer = document.getElementById('fieldsContainer');
-        const queryBtn = document.getElementById('queryBtn');
-        const exportBtn = document.getElementById('exportBtn');
-        const startTimeInput = document.getElementById('startTime');
-        const endTimeInput = document.getElementById('endTime');
-        const chartContainer = document.getElementById('chartContainer');
-        const otherDataPanel = document.getElementById('otherDataPanel');
-        const otherDataItems = document.getElementById('otherDataItems');
-        const emptyState = document.getElementById('emptyState');
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        const chartInfo = document.getElementById('chartInfo');
-        const recordCount = document.getElementById('recordCount');
+<script>
+(function() {
+    const API = `${window.location.protocol}//${window.location.host}/api/v1`;
+    let chartInstance = null;
+    let currentData = null;
+    let currentParams = {};
+    let fieldTypesMap = {};
 
-        async function apiGet(path) {
-            const resp = await fetch(`${API}${path}`);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            return resp.json();
+    const deviceSelect = document.getElementById('deviceSelect');
+    const fieldsContainer = document.getElementById('fieldsContainer');
+    const queryBtn = document.getElementById('queryBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const startTimeInput = document.getElementById('startTime');
+    const endTimeInput = document.getElementById('endTime');
+    const chartContainer = document.getElementById('chartContainer');
+    const otherDataPanel = document.getElementById('otherDataPanel');
+    const otherDataItems = document.getElementById('otherDataItems');
+    const emptyState = document.getElementById('emptyState');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const chartInfo = document.getElementById('chartInfo');
+    const recordCount = document.getElementById('recordCount');
+    const scaleToggle = document.getElementById('scaleToggle');
+    let currentScale = 'log10';
+
+    async function apiGet(path) {
+        const resp = await fetch(`${API}${path}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+    }
+
+    async function loadDevices() {
+        try {
+            const data = await apiGet('/data/devices');
+            deviceSelect.innerHTML = '<option value="">-- 请选择设备 --</option>';
+            data.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.device_id;
+                opt.textContent = d.name ? `${d.name} (${d.device_id})` : d.device_id;
+                deviceSelect.appendChild(opt);
+            });
+        } catch (e) {
+            deviceSelect.innerHTML = '<option value="">加载失败</option>';
+            console.error('加载设备列表失败:', e);
+        }
+    }
+
+    async function onDeviceChange() {
+        const deviceId = deviceSelect.value;
+        fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">加载中...</div>';
+        queryBtn.disabled = true;
+        exportBtn.disabled = true;
+
+        if (!deviceId) {
+            fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">请先选择设备</div>';
+            return;
         }
 
-        async function loadDevices() {
-            try {
-                const data = await apiGet('/data/devices');
-                deviceSelect.innerHTML = '<option value="">-- 请选择设备 --</option>';
-                data.forEach(d => {
-                    const opt = document.createElement('option');
-                    opt.value = d.device_id;
-                    opt.textContent = d.name ? `${d.name} (${d.device_id})` : d.device_id;
-                    deviceSelect.appendChild(opt);
-                });
-            } catch (e) {
-                deviceSelect.innerHTML = '<option value="">加载失败</option>';
-                console.error('加载设备列表失败:', e);
-            }
-        }
+        try {
+            const [fieldsResp, timeRangeResp] = await Promise.all([
+                apiGet(`/data/${encodeURIComponent(deviceId)}/fields`),
+                apiGet(`/data/${encodeURIComponent(deviceId)}/time-range`)
+            ]);
 
-        async function onDeviceChange() {
-            const deviceId = deviceSelect.value;
-            fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">加载中...</div>';
-            queryBtn.disabled = true;
-            exportBtn.disabled = true;
+            const fields = fieldsResp.fields || [];
+            const timeRange = timeRangeResp;
 
-            if (!deviceId) {
-                fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">请先选择设备</div>';
-                return;
-            }
-
-            try {
-                const [fieldsResp, timeRangeResp] = await Promise.all([
-                    apiGet(`/data/${encodeURIComponent(deviceId)}/fields`),
-                    apiGet(`/data/${encodeURIComponent(deviceId)}/time-range`)
-                ]);
-
-                const fields = fieldsResp.fields || [];
-                const timeRange = timeRangeResp;
-
-                fieldTypesMap = {};
-                fields.forEach(f => {
-                    const dataType = f.data_type || 'String';
-                    f.channels.forEach(ch => {
-                        fieldTypesMap[`${f.data_name}.${ch}`] = dataType;
-                    });
-                });
-
-                renderFields(fields);
-                queryBtn.disabled = fields.length === 0;
-
-                if (timeRange.start_time) {
-                    startTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
-                    endTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
-                    startTimeInput.min = toLocalDatetimeString(timeRange.start_time);
-                    endTimeInput.min = toLocalDatetimeString(timeRange.start_time);
-                }
-            } catch (e) {
-                fieldsContainer.innerHTML = '<div style="color: #e74c3c; text-align: center; padding: 20px; font-size: 0.9rem;">加载失败</div>';
-                console.error('加载字段失败:', e);
-            }
-        }
-
-        function renderFields(fields) {
-            if (!fields || fields.length === 0) {
-                fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">该设备暂无历史数据</div>';
-                return;
-            }
-
-            let html = '<div class="select-all-row">';
-            html += '<button class="select-all-btn" id="selectAllBtn">全选</button>';
-            html += '<button class="select-all-btn" id="deselectAllBtn">取消全选</button>';
-            html += '</div>';
-
+            fieldTypesMap = {};
             fields.forEach(f => {
-                html += '<div class="data-type-group">';
-                html += `<div class="data-type-label">${escapeHtml(f.data_name)}</div>`;
-                html += '<div class="channel-list">';
+                const dataType = f.data_type || 'String';
                 f.channels.forEach(ch => {
-                    const fieldKey = `${f.data_name}.${ch}`;
-                    html += `<div class="channel-item">`;
-                    html += `<input type="checkbox" id="ch_${escapeAttr(fieldKey)}" value="${escapeAttr(fieldKey)}">`;
-                    html += `<label for="ch_${escapeAttr(fieldKey)}">${escapeHtml(ch)}</label>`;
-                    html += '</div>';
+                    fieldTypesMap[`${f.data_name}.${ch}`] = dataType;
                 });
-                html += '</div></div>';
             });
 
-            fieldsContainer.innerHTML = html;
+            renderFields(fields);
+            queryBtn.disabled = fields.length === 0;
 
-            document.getElementById('selectAllBtn').addEventListener('click', () => {
-                fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
-            });
-            document.getElementById('deselectAllBtn').addEventListener('click', () => {
-                fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-            });
+            if (timeRange.start_time) {
+                startTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
+                endTimeInput.max = toLocalDatetimeString(timeRange.end_time || new Date().toISOString());
+                startTimeInput.min = toLocalDatetimeString(timeRange.start_time);
+                endTimeInput.min = toLocalDatetimeString(timeRange.start_time);
+            }
+        } catch (e) {
+            fieldsContainer.innerHTML = '<div style="color: #e74c3c; text-align: center; padding: 20px; font-size: 0.9rem;">加载失败</div>';
+            console.error('加载字段失败:', e);
+        }
+    }
+
+    function renderFields(fields) {
+        if (!fields || fields.length === 0) {
+            fieldsContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px; font-size: 0.9rem;">该设备暂无历史数据</div>';
+            return;
         }
 
-        function getSelectedFields() {
-            const checked = fieldsContainer.querySelectorAll('input[type="checkbox"]:checked');
-            return Array.from(checked).map(cb => cb.value);
-        }
+        let html = '<div class="select-all-row">';
+        html += '<button class="select-all-btn" id="selectAllBtn">全选</button>';
+        html += '<button class="select-all-btn" id="deselectAllBtn">取消全选</button>';
+        html += '</div>';
 
-        function setTimeRangeFromPreset(minutes) {
-            const end = new Date();
-            const start = new Date(end.getTime() - minutes * 60 * 1000);
-            startTimeInput.value = toLocalDatetimeString(start.toISOString());
-            endTimeInput.value = toLocalDatetimeString(end.toISOString());
-
-            document.querySelectorAll('.time-preset-btn').forEach(btn => {
-                btn.classList.toggle('active', parseInt(btn.dataset.minutes) === minutes);
+        fields.forEach(f => {
+            html += '<div class="data-type-group">';
+            html += `<div class="data-type-label">${escapeHtml(f.data_name)}</div>`;
+            html += '<div class="channel-list">';
+            f.channels.forEach(ch => {
+                const fieldKey = `${f.data_name}.${ch}`;
+                html += `<div class="channel-item">`;
+                html += `<input type="checkbox" id="ch_${escapeAttr(fieldKey)}" value="${escapeAttr(fieldKey)}">`;
+                html += `<label for="ch_${escapeAttr(fieldKey)}">${escapeHtml(ch)}</label>`;
+                html += '</div>';
             });
-        }
+            html += '</div></div>';
+        });
+
+        fieldsContainer.innerHTML = html;
+
+        document.getElementById('selectAllBtn').addEventListener('click', () => {
+            fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+        });
+        document.getElementById('deselectAllBtn').addEventListener('click', () => {
+            fieldsContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        });
+    }
+
+    function getSelectedFields() {
+        const checked = fieldsContainer.querySelectorAll('input[type="checkbox"]:checked');
+        return Array.from(checked).map(cb => cb.value);
+    }
+
+    function setTimeRangeFromPreset(minutes) {
+        const end = new Date();
+        const start = new Date(end.getTime() - minutes * 60 * 1000);
+        startTimeInput.value = toLocalDatetimeString(start.toISOString());
+        endTimeInput.value = toLocalDatetimeString(end.toISOString());
 
         document.querySelectorAll('.time-preset-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const minutes = parseInt(btn.dataset.minutes);
-                setTimeRangeFromPreset(minutes);
-            });
+            btn.classList.toggle('active', parseInt(btn.dataset.minutes) === minutes);
         });
+    }
 
-        startTimeInput.addEventListener('change', () => {
-            document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.time-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const minutes = parseInt(btn.dataset.minutes);
+            setTimeRangeFromPreset(minutes);
         });
-        endTimeInput.addEventListener('change', () => {
-            document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
-        });
+    });
 
-        queryBtn.addEventListener('click', async () => {
-            const deviceId = deviceSelect.value;
-            const fields = getSelectedFields();
-            const start = startTimeInput.value;
-            const end = endTimeInput.value;
+    startTimeInput.addEventListener('change', () => {
+        document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+    });
+    endTimeInput.addEventListener('change', () => {
+        document.querySelectorAll('.time-preset-btn').forEach(b => b.classList.remove('active'));
+    });
 
-            if (!deviceId || !start || !end) return;
-            if (fields.length === 0) {
-                alert('请至少选择一个数据通道');
-                return;
-            }
+    queryBtn.addEventListener('click', async () => {
+        const deviceId = deviceSelect.value;
+        const fields = getSelectedFields();
+        const start = startTimeInput.value;
+        const end = endTimeInput.value;
 
-            currentParams = {
-                device_id: deviceId,
-                fields: fields.join(','),
-                start: new Date(start).toISOString(),
-                end: new Date(end).toISOString()
-            };
-
-            loadingOverlay.style.display = 'flex';
-            emptyState.style.display = 'none';
-            chartContainer.style.display = 'none';
-
-            try {
-                const params = new URLSearchParams({
-                    fields: currentParams.fields,
-                    start: currentParams.start,
-                    end: currentParams.end
-                });
-                const data = await apiGet(`/data/${encodeURIComponent(deviceId)}?${params}`);
-                currentData = data;
-
-                if (!data.data || data.data.length === 0) {
-                    emptyState.style.display = 'flex';
-                    emptyState.querySelector('h3').textContent = '未查询到数据';
-                    emptyState.querySelector('p').textContent = '请调整时间范围或数据点后重试';
-                    chartInfo.textContent = '未查询到数据';
-                    recordCount.textContent = '';
-                    exportBtn.disabled = true;
-                } else {
-                    renderChart(data);
-                    exportBtn.disabled = false;
-                    const deviceName = deviceSelect.options[deviceSelect.selectedIndex].textContent;
-                    chartInfo.innerHTML = `<strong>${escapeHtml(deviceName)}</strong> | ${escapeHtml(currentParams.fields)} | ${data.count} 条记录`;
-                    recordCount.textContent = `${data.data.length} 数据点`;
-                }
-            } catch (e) {
-                emptyState.style.display = 'flex';
-                emptyState.querySelector('h3').textContent = '查询失败';
-                emptyState.querySelector('p').textContent = e.message;
-                chartInfo.textContent = '查询出错';
-                console.error('查询失败:', e);
-            } finally {
-                loadingOverlay.style.display = 'none';
-            }
-        });
-
-        function renderChart(data) {
-            emptyState.style.display = 'none';
-            chartContainer.style.display = 'block';
-
-            if (!chartInstance) {
-                chartInstance = echarts.init(chartContainer);
-            }
-
-            const numericSeriesMap = {};
-            const nonNumericDataMap = {};
-            const allKeys = [];
-
-            data.data.forEach(record => {
-                const key = `${record.data_name}.${record.channel}`;
-                if (!allKeys.includes(key)) {
-                    allKeys.push(key);
-                }
-                const fieldType = fieldTypesMap[key] || 'String';
-                const isNumeric = fieldType === 'Integer' || fieldType === 'Float';
-
-                if (isNumeric) {
-                    if (!numericSeriesMap[key]) {
-                        numericSeriesMap[key] = [];
-                    }
-                    numericSeriesMap[key].push([record.time, record.value]);
-                } else {
-                    if (!nonNumericDataMap[key]) {
-                        nonNumericDataMap[key] = [];
-                    }
-                    nonNumericDataMap[key].push({ time: record.time, value: record.value });
-                }
-            });
-
-            const series = [];
-            const legendData = [];
-            const colorPalette = [
-                '#4a6cf7', '#e74c3c', '#27ae60', '#f39c12', '#9b59b6',
-                '#1abc9c', '#e67e22', '#3498db', '#e91e63', '#00bcd4',
-                '#8bc34a', '#ff5722', '#607d8b', '#795548', '#cddc39'
-            ];
-
-            let colorIdx = 0;
-            Object.entries(numericSeriesMap).forEach(([key, points]) => {
-                const color = colorPalette[colorIdx % colorPalette.length];
-                series.push({
-                    name: key,
-                    type: 'line',
-                    data: points,
-                    showSymbol: false,
-                    smooth: false,
-                    lineStyle: { width: 1.5, color: color },
-                    itemStyle: { color: color },
-                    emphasis: { lineStyle: { width: 2.5 } }
-                });
-                legendData.push(key);
-                colorIdx++;
-            });
-
-            Object.keys(nonNumericDataMap).forEach(key => {
-                nonNumericDataMap[key].sort((a, b) => new Date(a.time) - new Date(b.time));
-            });
-
-            const hasNonNumeric = Object.keys(nonNumericDataMap).length > 0;
-            if (hasNonNumeric) {
-                otherDataPanel.classList.add('show');
-                const nonNumericKeys = Object.keys(nonNumericDataMap);
-                otherDataItems.innerHTML = nonNumericKeys.map(key => {
-                    return `<div class="other-data-item"><span class="label">${escapeHtml(key)}:</span><span class="value" id="value_${escapeAttr(key)}">-</span></div>`;
-                }).join('');
-            } else {
-                otherDataPanel.classList.remove('show');
-            }
-
-            const option = {
-                animation: false,
-                tooltip: {
-                    trigger: 'axis',
-                    axisPointer: { type: 'cross' },
-                    formatter: function(params) {
-                        let html = `<div style="font-size:12px;margin-bottom:4px;color:#666">${params[0].axisValue}</div>`;
-                        params.forEach(p => {
-                            html += `<div style="margin:2px 0">${p.marker} ${p.seriesName}: <strong>${p.value[1]}</strong></div>`;
-                        });
-                        return html;
-                    }
-                },
-                legend: {
-                    data: legendData,
-                    top: 10,
-                    type: 'scroll',
-                    textStyle: { fontSize: 12 }
-                },
-                grid: {
-                    left: '3%', right: '4%', top: hasNonNumeric ? '15%' : '15%', bottom: '15%',
-                    containLabel: true
-                },
-                dataZoom: [
-                    { type: 'inside', start: 0, end: 100 },
-                    { type: 'slider', show: true, start: 0, end: 100, height: 24, bottom: 10 }
-                ],
-                xAxis: {
-                    type: 'time',
-                    axisLabel: {
-                        formatter: function(val) {
-                            const d = new Date(val);
-                            return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-                        }
-                    },
-                    splitLine: { show: true, lineStyle: { type: 'dashed', color: '#f0f0f0' } }
-                },
-                yAxis: {
-                    type: 'value',
-                    axisLabel: {
-                        formatter: function(val) {
-                            if (Math.abs(val) < 1 && val !== 0) {
-                                let n = 0, v = val;
-                                while (Math.abs(v) < 1) { v *= 10; n++; }
-                                return v.toFixed(1) + 'e-' + n;
-                            } else if (Math.abs(val) >= 10000) {
-                                let n = 0, v = val;
-                                while (Math.abs(v) >= 10) { v /= 10; n++; }
-                                return v.toFixed(1) + 'e' + n;
-                            }
-                            return val;
-                        }
-                    }
-                },
-                series: series
-            };
-
-            chartInstance.setOption(option, true);
-
-            chartInstance.off('updateAxisPointer');
-            chartInstance.on('updateAxisPointer', function(event) {
-                const xAxisInfo = event.axesInfo[0];
-                if (xAxisInfo) {
-                    const currentTime = xAxisInfo.value;
-                    updateNonNumericData(currentTime, nonNumericDataMap);
-                }
-            });
-
-            function updateNonNumericData(currentTime, nonNumericDataMap) {
-                const currentDate = new Date(currentTime);
-                Object.keys(nonNumericDataMap).forEach(key => {
-                    const dataList = nonNumericDataMap[key];
-                    let lastValue = null;
-                    for (let i = 0; i < dataList.length; i++) {
-                        const dataTime = new Date(dataList[i].time);
-                        if (dataTime <= currentDate) {
-                            lastValue = dataList[i].value;
-                        } else {
-                            break;
-                        }
-                    }
-                    const valueEl = document.getElementById(`value_${key}`);
-                    if (valueEl) {
-                        valueEl.textContent = lastValue !== null ? escapeHtml(String(lastValue)) : '-';
-                    }
-                });
-            }
-
-            let resizeTimer;
-            const resizeHandler = () => {
-                clearTimeout(resizeTimer);
-                resizeTimer = setTimeout(() => chartInstance.resize(), 200);
-            };
-            window.addEventListener('resize', resizeHandler);
-            setTimeout(() => chartInstance.resize(), 100);
+        if (!deviceId || !start || !end) return;
+        if (fields.length === 0) {
+            alert('请至少选择一个数据通道');
+            return;
         }
 
-        exportBtn.addEventListener('click', () => {
-            if (!currentParams.device_id) return;
+        currentParams = {
+            device_id: deviceId,
+            fields: fields.join(','),
+            start: new Date(start).toISOString(),
+            end: new Date(end).toISOString()
+        };
+
+        loadingOverlay.style.display = 'flex';
+        emptyState.style.display = 'none';
+        chartContainer.style.display = 'none';
+
+        try {
             const params = new URLSearchParams({
-                format: 'csv',
                 fields: currentParams.fields,
                 start: currentParams.start,
                 end: currentParams.end
             });
-            const url = `${API}/data/${encodeURIComponent(currentParams.device_id)}/export?${params}`;
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = '';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            const data = await apiGet(`/data/${encodeURIComponent(deviceId)}?${params}`);
+            currentData = data;
+
+            if (!data.data || data.data.length === 0) {
+                emptyState.style.display = 'flex';
+                emptyState.querySelector('h3').textContent = '未查询到数据';
+                emptyState.querySelector('p').textContent = '请调整时间范围或数据点后重试';
+                chartInfo.textContent = '未查询到数据';
+                recordCount.textContent = '';
+                exportBtn.disabled = true;
+            } else {
+                renderChart(data);
+                exportBtn.disabled = false;
+                const deviceName = deviceSelect.options[deviceSelect.selectedIndex].textContent;
+                chartInfo.innerHTML = `<strong>${escapeHtml(deviceName)}</strong> | ${escapeHtml(currentParams.fields)} | ${data.count} 条记录`;
+                recordCount.textContent = `${data.data.length} 数据点`;
+            }
+        } catch (e) {
+            emptyState.style.display = 'flex';
+            emptyState.querySelector('h3').textContent = '查询失败';
+            emptyState.querySelector('p').textContent = e.message;
+            chartInfo.textContent = '查询出错';
+            console.error('查询失败:', e);
+        } finally {
+            loadingOverlay.style.display = 'none';
+        }
+    });
+
+    function formatYAxisLabel(value, scale) {
+        if (scale === 'log10') {
+            if (value <= 0) return '0';
+            
+            const log10 = Math.log10(value);
+            
+            // 处理科学计数法显示
+            if (value < 0.001 || value >= 10000) {
+                return value.toExponential(2);
+            }
+            
+            // 如果是对数刻度，尝试使用更好的格式
+            if (Math.abs(log10 - Math.round(log10)) < 0.0001) {
+                return '1e' + Math.round(log10);
+            }
+            
+            return value.toFixed(2);
+        } else {
+            // 线性模式
+            if (value === 0) return '0';
+            
+            const absValue = Math.abs(value);
+            
+            // 使用科学计数法的情况
+            if (absValue < 0.001 || absValue >= 10000) {
+                return value.toExponential(2);
+            }
+            
+            // 处理小数精度
+            if (absValue < 1) {
+                // 小于1的值，显示4位小数
+                return value.toFixed(4).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+            } else if (absValue < 10) {
+                // 1-10之间的值，显示3位小数
+                return value.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+            } else if (absValue < 100) {
+                // 10-100之间的值，显示2位小数
+                return value.toFixed(2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+            } else {
+                // 100以上的值，显示1位小数
+                return value.toFixed(1).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+            }
+        }
+    }
+
+    function renderChart(data) {
+        emptyState.style.display = 'none';
+        chartContainer.style.display = 'block';
+
+        if (!chartInstance) {
+            chartInstance = echarts.init(chartContainer);
+        }
+
+        const numericSeriesMap = {};
+        const nonNumericDataMap = {};
+        const allKeys = [];
+
+        // 首先将所有数据按时间排序
+        data.data.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+        data.data.forEach(record => {
+            const key = `${record.data_name}.${record.channel}`;
+            if (!allKeys.includes(key)) {
+                allKeys.push(key);
+            }
+            const fieldType = fieldTypesMap[key] || 'String';
+            const isNumeric = fieldType === 'Integer' || fieldType === 'Float';
+
+            if (isNumeric) {
+                if (!numericSeriesMap[key]) {
+                    numericSeriesMap[key] = [];
+                }
+                // 在log10模式下，过滤掉非正数
+                if (currentScale === 'log10' && record.value <= 0) {
+                    return;
+                }
+                numericSeriesMap[key].push([record.time, record.value]);
+            } else {
+                if (!nonNumericDataMap[key]) {
+                    nonNumericDataMap[key] = [];
+                }
+                nonNumericDataMap[key].push({ time: record.time, value: record.value });
+            }
         });
 
-        deviceSelect.addEventListener('change', onDeviceChange);
+        const series = [];
+        const legendData = [];
+        const colorPalette = [
+            '#4a6cf7', '#e74c3c', '#27ae60', '#f39c12', '#9b59b6',
+            '#1abc9c', '#e67e22', '#3498db', '#e91e63', '#00bcd4',
+            '#8bc34a', '#ff5722', '#607d8b', '#795548', '#cddc39'
+        ];
 
-        function toLocalDatetimeString(isoStr) {
-            const d = new Date(isoStr);
-            const pad = n => n.toString().padStart(2, '0');
-            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        let colorIdx = 0;
+        Object.entries(numericSeriesMap).forEach(([key, points]) => {
+            if (points.length === 0) return;
+            
+            const color = colorPalette[colorIdx % colorPalette.length];
+            
+            // 对每个序列的数据点按时间排序
+            points.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+            
+            // 处理数据点，添加null点来断开间隔过大的线
+            const processedPoints = [];
+            const disconnectThreshold = 5 * 60 * 1000; // 5分钟（单位：毫秒），超过这个间隔就断开
+            
+            for (let i = 0; i < points.length; i++) {
+                const currentPoint = points[i];
+                processedPoints.push(currentPoint);
+                
+                // 如果不是最后一个点，检查与下一个点的时间间隔
+                if (i < points.length - 1) {
+                    const currentTime = new Date(currentPoint[0]).getTime();
+                    const nextTime = new Date(points[i + 1][0]).getTime();
+                    const timeDiff = nextTime - currentTime;
+                    
+                    // 如果时间间隔超过阈值，插入一个null点来断开连线
+                    if (timeDiff > disconnectThreshold) {
+                        // 插入一个null点，ECharts在遇到null值时会断开连线
+                        processedPoints.push([currentPoint[0], null]);
+                    }
+                }
+            }
+            
+            series.push({
+                name: key,
+                type: 'line',
+                data: processedPoints,
+                showSymbol: false,
+                smooth: false,
+                lineStyle: { width: 1.5, color: color },
+                itemStyle: { color: color },
+                emphasis: { lineStyle: { width: 2.5 } },
+                connectNulls: false, // 关键：设置为false，不连接null点
+                symbol: 'none' // 不显示点的符号
+            });
+            
+            legendData.push(key);
+            colorIdx++;
+        });
+
+        Object.keys(nonNumericDataMap).forEach(key => {
+            nonNumericDataMap[key].sort((a, b) => new Date(a.time) - new Date(b.time));
+        });
+
+        const hasNonNumeric = Object.keys(nonNumericDataMap).length > 0;
+        if (hasNonNumeric) {
+            otherDataPanel.classList.add('show');
+            const nonNumericKeys = Object.keys(nonNumericDataMap);
+            otherDataItems.innerHTML = nonNumericKeys.map(key => {
+                return `<div class="other-data-item"><span class="label">${escapeHtml(key)}:</span><span class="value" id="value_${escapeAttr(key)}">-</span></div>`;
+            }).join('');
+        } else {
+            otherDataPanel.classList.remove('show');
         }
 
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
+        // 计算Y轴范围，为log10模式智能划分刻度
+        let yAxisMin = undefined;
+        let yAxisMax = undefined;
+        let yAxisInterval = undefined;
+        
+        if (currentScale === 'log10' && Object.keys(numericSeriesMap).length > 0) {
+            // 收集所有数值
+            const allValues = [];
+            Object.values(numericSeriesMap).forEach(points => {
+                points.forEach(point => {
+                    if (point[1] > 0) { // 确保是正数
+                        allValues.push(point[1]);
+                    }
+                });
+            });
+            
+            if (allValues.length > 0) {
+                const minVal = Math.min(...allValues);
+                const maxVal = Math.max(...allValues);
+                
+                // 计算对数值
+                const logMin = Math.log10(minVal);
+                const logMax = Math.log10(maxVal);
+                
+                // 确保刻度是10的整数次幂
+                yAxisMin = Math.pow(10, Math.floor(logMin));
+                yAxisMax = Math.pow(10, Math.ceil(logMax));
+                
+                // 如果范围太大，使用更大的步长
+                const logRange = logMax - logMin;
+                if (logRange > 6) {
+                    yAxisInterval = Math.ceil(logRange / 6);
+                } else if (logRange > 3) {
+                    yAxisInterval = Math.ceil(logRange / 3);
+                } else {
+                    yAxisInterval = 1;
+                }
+            }
         }
 
-        function escapeAttr(str) {
-            return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const option = {
+            animation: false,
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'cross' },
+                formatter: function(params) {
+                    // 过滤掉null值
+                    const validParams = params.filter(p => p.value && p.value[1] !== null);
+                    if (validParams.length === 0) return '';
+                    
+                    const date = new Date(validParams[0].value[0]);
+                    const timeStr = `${date.getFullYear()}/${(date.getMonth()+1).toString().padStart(2,'0')}/${date.getDate().toString().padStart(2,'0')} ${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
+                    
+                    let html = `<div style="font-size:12px;margin-bottom:4px;color:#666">${timeStr}</div>`;
+                    validParams.forEach(p => {
+                        if (p.value && p.value[1] !== null) {
+                            const formattedValue = formatYAxisLabel(p.value[1], currentScale);
+                            html += `<div style="margin:2px 0">${p.marker} ${p.seriesName}: <strong>${formattedValue}</strong></div>`;
+                        }
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                data: legendData,
+                top: 10,
+                type: 'scroll',
+                textStyle: { fontSize: 12 }
+            },
+            grid: {
+                left: '3%', right: '4%', top: hasNonNumeric ? '15%' : '15%', bottom: '15%',
+                containLabel: true
+            },
+            dataZoom: [
+                { type: 'inside', start: 0, end: 100 },
+                { type: 'slider', show: true, start: 0, end: 100, height: 24, bottom: 10 }
+            ],
+            xAxis: {
+                type: 'time',
+                axisLabel: {
+                    formatter: function(val) {
+                        const d = new Date(val);
+                        return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+                    }
+                },
+                splitLine: { show: true, lineStyle: { type: 'dashed', color: '#f0f0f0' } }
+            },
+            yAxis: {
+                type: currentScale === 'log10' ? 'log' : 'value',
+                logBase: currentScale === 'log10' ? 10 : undefined,
+                min: yAxisMin,
+                max: yAxisMax,
+                interval: yAxisInterval,
+                axisLabel: {
+                    formatter: function(val) {
+                        return formatYAxisLabel(val, currentScale);
+                    }
+                },
+                splitLine: { show: true, lineStyle: { type: 'dashed', color: '#f0f0f0' } }
+            },
+            series: series
+        };
+
+        chartInstance.setOption(option, true);
+
+        chartInstance.off('updateAxisPointer');
+        chartInstance.on('updateAxisPointer', function(event) {
+            const xAxisInfo = event.axesInfo[0];
+            if (xAxisInfo) {
+                const currentTime = xAxisInfo.value;
+                updateNonNumericData(currentTime, nonNumericDataMap);
+            }
+        });
+
+        function updateNonNumericData(currentTime, nonNumericDataMap) {
+            const currentDate = new Date(currentTime);
+            Object.keys(nonNumericDataMap).forEach(key => {
+                const dataList = nonNumericDataMap[key];
+                let lastValue = null;
+                for (let i = 0; i < dataList.length; i++) {
+                    const dataTime = new Date(dataList[i].time);
+                    if (dataTime <= currentDate) {
+                        lastValue = dataList[i].value;
+                    } else {
+                        break;
+                    }
+                }
+                const valueEl = document.getElementById(`value_${key}`);
+                if (valueEl) {
+                    valueEl.textContent = lastValue !== null ? escapeHtml(String(lastValue)) : '-';
+                }
+            });
         }
 
-        loadDevices();
-    })();
-    </script>
+        let resizeTimer;
+        const resizeHandler = () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => chartInstance.resize(), 200);
+        };
+        window.addEventListener('resize', resizeHandler);
+        setTimeout(() => chartInstance.resize(), 100);
+    }
+    scaleToggle.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const newScale = btn.dataset.scale;
+            if (newScale === currentScale) return;
+            currentScale = newScale;
+            scaleToggle.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scale === newScale));
+            if (currentData && currentData.data && currentData.data.length > 0) {
+                renderChart(currentData);
+            }
+        });
+    });
+
+    exportBtn.addEventListener('click', () => {
+        if (!currentParams.device_id) return;
+        const params = new URLSearchParams({
+            format: 'csv',
+            fields: currentParams.fields,
+            start: currentParams.start,
+            end: currentParams.end
+        });
+        const url = `${API}/data/${encodeURIComponent(currentParams.device_id)}/export?${params}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+
+    deviceSelect.addEventListener('change', onDeviceChange);
+
+    function toLocalDatetimeString(isoStr) {
+        const d = new Date(isoStr);
+        const pad = n => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function escapeAttr(str) {
+        return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // 初始化时间范围
+    const now = new Date();
+    endTimeInput.value = toLocalDatetimeString(now.toISOString());
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    startTimeInput.value = toLocalDatetimeString(oneHourAgo.toISOString());
+    
+    loadDevices();
+})();
+</script>
 </body>
 </html>
