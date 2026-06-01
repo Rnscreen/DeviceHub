@@ -1,3 +1,4 @@
+import { Utils } from './utils.js';
 export class ChartManager {
     constructor() {
         this.chartInstances = new Map(); // 存储图表实例：key = "deviceId.dataType"
@@ -72,26 +73,7 @@ export class ChartManager {
             yAxis: {
                 type: 'value',
                 axisLabel: {
-                    formatter: function (value) {
-                    if (Math.abs(value) < 1 && value !== 0) {
-                        // 小于1的情况，处理为负指数
-                        let numN2 = 0;
-                        while (Math.abs(value) < 1) {
-                            value *= 10;
-                            numN2++;
-                        }
-                        return value.toFixed(1) + "e-" + numN2;
-                    } else if (Math.abs(value) >= 10000) {
-                        // 大于等于10000的情况，处理为正指数
-                            let numN1 = 0;
-                            while (Math.abs(value) >= 10) {
-                            value /= 10;
-                            numN1++;
-                            }
-                        return value.toFixed(1) + "e" + numN1;
-                        }
-                        return value; // 普通显示
-                    }
+                    formatter: (value) => Utils.formatDisplayValue(value)
                 }
             },
             series: []
@@ -150,14 +132,14 @@ export class ChartManager {
         
         dataEntries.forEach(({ key, data }) => {
             const channel = key.split('.')[1] || 'default'; // 提取通道
-            const seriesKey = `${dataType}.${channel}`;
+            const seriesKey = `${channel}`; //${dataType} 如果需要区分数据类型, 但现在已根据数据类型分组, 不需要额外区分
             
             this.updateDataSeries(chartKey, seriesKey, data, channel);
             
             const seriesData = chartData.series.get(seriesKey) || [];
             
             series.push({
-                name: `${this.formatLabel(dataType)} ${channel}`,
+                name: `${channel}`, // ${this.formatLabel(dataType)} 
                 type: 'line',
                 showSymbol: false, // 隐藏点提高性能
                 hoverAnimation: false, // 关闭悬停动画
@@ -173,17 +155,17 @@ export class ChartManager {
                 }
             });
             
-            legendData.push(`${this.formatLabel(dataType)} ${channel}`);
+            legendData.push(`${channel}`); //${this.formatLabel(dataType)} 
         });
 
         const option = {
-            title: {
-                text: `${deviceName} - ${this.formatLabel(dataType)}`,
-                left: 'center',
-                textStyle: {
-                    fontSize: 14
-                }
-            },
+            // title: {
+            //     text: `${this.formatLabel(dataType)}`, //`${deviceName} - ${this.formatLabel(dataType)}
+            //     left: 'center', // or 'left'
+            //     textStyle: {
+            //         fontSize: 13
+            //     }
+            // },
             legend: {
                 data: legendData
             },

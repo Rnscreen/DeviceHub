@@ -12,10 +12,10 @@
     <div class="container">
         <header>
             <div class="logo">
-                <i class="fas fa-industry"></i>
+                <!-- <i class="fas fa-industry"></i> -->
                 <h1>设备面板</h1>
                 <a href="/static/page/history.html" target="_blank" rel="noopener noreferrer">
-                        <span>点我查看历史数据</span>
+                        <i class="fas fa-history"></i>
                 </a>
             </div>
             <div class="status-indicator">
@@ -31,14 +31,14 @@
         
         <div class="layout">
             <!-- 左侧：设备列表 -->
-            <div class="panel">
+            <div class="left-panel panel">
                 <div class="panel-title">
                     <i class="fas fa-microchip"></i>
                     <span>设备列表</span>
                 </div>
                 
                 <div class="connection-form">
-                    <input type="text" id="wsUrl" class="url-input" value="ws://localhost:8000/ws/" placeholder="输入WebSocket URL">
+                    <input type="text" id="serverUrl" class="url-input" value="localhost:8000" placeholder="输入服务器 URL">
                 </div>
                 
                 <div class="device-list" id="deviceList">
@@ -47,7 +47,7 @@
             </div>
             
             <!-- 中间：实时数据显示 -->
-            <div class="panel">
+            <div class="middle-panel panel">
                 <div class="panel-title">
                     <i class="fas fa-chart-line"></i>
                     <span>实时监控</span>
@@ -69,7 +69,7 @@
             </div>
             
             <!-- 右侧：控制面板 -->
-            <div class="panel">
+            <div class="right-panel panel">
                 <div class="panel-title">
                     <i class="fas fa-sliders-h"></i>
                     <span>设备控制</span>
@@ -117,12 +117,10 @@
                 </div>
             </div>
         </div>
-        
-        <div class="footer">
-            <p>工业设备监控网关前端界面 | 版本 1.0 | 实时数据通过WebSocket推送</p>
-        </div>
     </div>
-
+    <!-- <div class="footer">
+        <p>DeviceHub v1.1</p>
+    </div> -->
     <script type="module" src="js/appv1.js"></script>
 </body>
 </html>

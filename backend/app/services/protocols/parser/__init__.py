@@ -1,1 +1,2 @@
-from .ascii import AsciiResponseParser # type: ignore
+from .ascii import AsciiResponseParser
+from .modbus import ModbusResponseParser

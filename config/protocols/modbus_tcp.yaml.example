@@ -1,0 +1,184 @@
+# 1. 基本定义
+name: modbus_tcp_test
+version: "1.0"
+device_type: test
+
+protocol_type: 'modbus_tcp' #tcp|modbus_tcp|modbus_rtu|serial|usb
+
+# 2. 通道定义:
+channels:
+  PV: # 过程值(温度) x0.1
+    CH1:
+      address: 0x0000  #寄存器地址
+      #registers: 1  #默认1个寄存器，可省略
+      type: short #读写 类型 int16,uint16,int32,uint32,float,double,hex,str(to ascii)
+      order: 12 #顺序
+      factor: 0.1 #缩放因子
+    CH2:
+      address: 0x0001
+      type: short
+      order: 12
+      factor: 0.1
+  SV: # 设置值 x0.1
+    CH1:
+      address: 0x0004
+      type: short
+      order: 12
+      factor: 0.1
+    CH2:
+      address: 0x0005
+      type: short
+      order: 12
+      factor: 0.1
+  MV: # 功率百分比
+    CH1:
+      address: 0x0008
+      type: short
+      order: 12
+    CH2:
+      address: 0x0009
+      type: short
+      order: 12
+  SRUN: #运行状态
+    CH1:
+      address: 0x000c
+      type: short
+      order: 12
+    CH2:
+      address: 0x000d
+      type: short
+      order: 12
+  STEP: #当前步骤
+    CH1:
+      address: 0x0010
+      type: short
+      order: 12
+    CH2:
+      address: 0x0011
+      type: short
+      order: 12
+  AUTO: #是否自动
+    CH1:
+      address: 0x0018
+      type: short
+      order: 12
+    CH2:
+      address: 0x0019
+      type: short
+      order: 12
+  MV_MANUAL: #手动功率百分比
+    CH1:
+      address: 0x001c
+      type: short
+      order: 12
+    CH2:
+      address: 0x001d
+      type: short
+      order: 12
+  RECIPE: #配方表
+    CH1:
+      address: 0x0050
+      type: short
+      registers: 60 #60个寄存器, 即该配方表是由60个连续寄存器组成的
+      order: 12
+      factor: 0.1
+    CH2:
+      address: 0x008C
+      type: short
+      registers: 60
+      order: 12
+      factor: 0.1
+
+# 3. 枚举定义
+enums:
+  run_status:
+    0: Running
+    1: Stopped
+  auto:
+    0: Manual
+    1: Auto
+
+# 4. 数据结构定义
+data:
+  # 监视器 (高频)
+  monitor_fast:
+    temperature: # 温度 单位:℃
+      description: "读通道温度"
+      channel: PV
+      fc: 0x03
+      type: float # 存到数据库的类型
+    setpoint: # 设置值 单位:℃
+      description: "读通道设置值"
+      channel: SV
+      fc: 0x03
+      type: float
+    power: # 功率百分比
+      description: "读通道功率百分比"
+      channel: MV
+      fc: 0x03
+      type: int
+
+  # 状态监视,低频,同monitor
+  status:
+    run_status: #运行状态
+      description: "读运行状态"
+      channel: SRUN
+      fc: 0x03
+      type: enum
+      enum: enums.run_status
+    current_step: #当前步骤
+      description: "读当前步骤"
+      channel: STEP
+      fc: 0x03
+      type: str
+    auto_mode: #是否自动
+      description: "读自动模式"
+      channel: AUTO
+      fc: 0x03
+      type: enum
+      enum: enums.auto
+
+  # 静态信息, 极低频, 仅在连接\重连到设备时读取一次, 同status
+  info: 
+    recipe: #配方表
+      description: "读配方表"
+      channel: RECIPE
+      fc: 0x03
+      order: 12
+      type: str
+
+# 5. 控制器定义
+controls:
+  run_status: #运行状态
+    description: "设置运行状态"
+    channel: SRUN
+    fc: 0x06
+    type: enum
+    enum: enums.run_status
+  auto_mode: #是否自动
+    description: "设置自动模式"
+    channel: AUTO
+    fc: 0x06
+    type: enum
+    enum: enums.auto
+  power: #手动功率百分比
+    description: "设置手动功率百分比"
+    channel: MV_MANUAL
+    fc: 0x06
+    type: int
+    min: 0
+    max: 100
+  recipe: #配方表
+    description: "设置配方表"
+    channel: RECIPE
+    fc: 0x10
+    type: str
+
+# 6. 通信协议格式
+protocols: None # Modbus无需自定义协议收发格式
+
+#7. 命令定义(send)
+command: None # Modbus标准命令构建
+
+# 8. 解析定义(parse)
+parse: None # Modbus标准解析

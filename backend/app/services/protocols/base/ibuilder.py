@@ -5,7 +5,7 @@ from ....models import ProtocolConfig, ControlDefinition, DataDefinition,\
                         ControlCommands, PollCommands, ModbusChannel
 
 class ICommandBuilder(ABC):
-    """命令构建器抽象基类 - 重新设计版本"""
+    """命令构建器抽象基类"""
     
     def __init__(
         self,

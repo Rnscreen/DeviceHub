@@ -1,4 +1,4 @@
-# backend/app/services/device_manager.py
+# backend/app/services/devices.py
 """
 设备管理器
 """
@@ -97,6 +97,10 @@ class DeviceManager:
         for device_id, device_config in self.device_configs.items():
             if not device_config.enabled:
                 logger.info("跳过禁用设备: %s", device_id)
+                continue
+
+            if device_id in self.devices:
+                # 设备已初始化，跳过
                 continue
             
             # 确定协议名称
@@ -259,7 +263,7 @@ class DeviceManager:
             # 存储数据
             if self.db_service:
                 try:
-                    self.db_service.write_device_data(poll_data)
+                    await self.db_service.write_device_data(poll_data)
                 except Exception as e:
                     logger.error("存储设备 %s 数据失败: %s", device_id, e)
 
@@ -383,7 +387,7 @@ class DeviceManager:
                 if isinstance(result, DataFrame):
                     if self.db_service:
                         try:
-                            self.db_service.write_device_data(result)
+                            await self.db_service.write_device_data(result)
                         except Exception as e:
                             logger.error("存储设备 %s 数据失败: %s", device_id, e)
 
@@ -549,6 +553,9 @@ class DeviceManager:
         # 清除缓存
         if protocol_name in self.protocol_configs:
             del self.protocol_configs[protocol_name]
+        else:
+            # 创建新的协议配置实例
+            await self.initialize_devices()
         
         # 清除相关设备的函数缓存
         for device_id, device in self.devices.items():

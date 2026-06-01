@@ -43,14 +43,84 @@ class PollDataType(str, Enum):
 
 class ModbusRegister(BaseModel):
     """Modbus寄存器配置"""
-    address: int
-    size: int = 2
-    type: Literal["int16", "uint16", "int32", "uint32", "float", "double", "hex", "str"] = "int16"
-    order: Literal["big", "little"] = "big"
+    address: int     # 寄存器地址
+    registers: int = 1    # 寄存器数量
+    type: Literal["bit","short","int16", "uint16", "int32", "uint32", "float", "double", "hex", "str", "short"] = "int16" # 寄存器类型
+    size: int = 2 # 寄存器大小
+    order: Literal["1234","4321","3412","2143","12","21","big","little"] = "12" # 字节序
     factor: float = 1.0
+
+    @model_validator(mode="after")
+    def after_validate(self) -> "ModbusRegister":
+        """后处理"""
+        # 处理寄存器数量
+        if self.registers <= 0:
+            self.registers = 1
+        else:
+            type_sizes = {
+                'bit': 1,
+                'int16': 2, 'short': 2, 'uint16': 2,
+                'int32': 4, 'uint32': 4,
+                'float': 4, 'double': 8,
+                'hex': 2, 'str': 2,
+            }
+            self.size = type_sizes.get(self.type, 2)
+
+        # 字节序后处理, 防止字节序与寄存器类型不匹配
+        match self.type:
+            case 'int32' | 'uint32' | 'float' | 'double':
+                match self.order:
+                    case "1234" | "4321" | "3412" | "2143":
+                        # 四字节序不处理
+                        pass
+                    case "21"|"little": 
+                        # 小端转化为4321
+                        self.order = "4321"
+                    case _: 
+                        # 其他默认为1234
+                        self.order = "1234"
+            case 'int16' | 'uint16' | 'short':
+                match self.order:
+                    case "4321"|"21"|"little": 
+                        # 小端转化为二字节序
+                        self.order = "21"
+                    case _:
+                        # 其他默认为12
+                        self.order = "12"
+            case _: 
+                self.order = "12"
+                pass
+
+        return self
+    
+    @field_validator("order", mode="before")
+    @classmethod
+    def validate_order(cls, v: Any) -> str:
+        if isinstance(v, int):
+            return str(v)
+        return str(v) if v is not None else "big"
+    
+    @field_validator("factor", mode="before")
+    @classmethod
+    def validate_factor(cls, v: Any) -> float:
+        """验证缩放因子"""
+        if v == 0:
+            raise ValueError("Factor is not allowed to be 0, it may make division by zero error!")
+        return v
+    
+    @field_validator("address", mode="before")
+    @classmethod
+    def validate_address(cls, v: Any) -> int:
+        """验证地址"""
+        if v < 0:
+            raise ValueError("Address is not allowed to be negative!")
+        return v
 
 class ModbusChannel(dict[str, ModbusRegister]):
     """Modbus模式通道 - 寄存器配置"""
+    def __init__(self, kwargs: dict[str, Any]):
+        for key, value in kwargs.items():
+            self[key] = ModbusRegister(**value)
     def get_channels(self)-> dict[str,int]:
         """获取ModbusChannel的通道列表"""
         v:dict[str,int]={}
@@ -62,7 +132,6 @@ AsciiChannel=list[str] #Modbus模式通道 - 寄存器配置"""
 Channel = Union[str,AsciiChannel,ModbusChannel]
 class ChannelConfig(dict[str,Channel]):
     """通道配置"""
-
     @property
     def all_channels(self)-> dict[str,list[str]]:
         """获取通道列表"""
@@ -101,8 +170,10 @@ class DataDefinition(BaseModel):
     channel_group: str = "main"
     channel: Optional[str] = Field(default=None, validation_alias="channel")
     type: Literal["int", "float", "str", "bool", "enum", "None"] = "str"
+    enum: Optional[str] = None  # 枚举名，引用protocol.enums中的枚举
     max: Optional[float] = None
     min: Optional[float] = None
+    fc: Optional[int] = None
 
     @field_validator("channel", mode="before")
     @classmethod
@@ -269,6 +340,17 @@ class PollCommand(BaseModel):
     def __init__(self, data_name: str,
                  channel: Union[str, list[str], None] = None):
         super().__init__(data_name=data_name, channel=channel)
+    def expand(self) -> PollCommands:
+        """展开通道"""
+        if self.channel is None:
+            return [self]
+        if isinstance(self.channel, str):
+            return [self]
+        elif isinstance(self.channel, list): #type: ignore
+            return [PollCommand(data_name=self.data_name, channel=ch) for ch in self.channel]
+        else:
+            raise ValueError("channel must be a string or a list of strings.")
+        
 # 控制命令 (data_name, channel, value)
 class ControlCommand(BaseModel):
     """控制命令"""
@@ -309,19 +391,53 @@ class ProtocolConfig(BaseModel):
     data: dict[PollDataType, dict[str, DataDefinition]]
     controls: dict[str, ControlDefinition]
 
-    protocols: ProtocolFormat
-    command: ProtocolCommand
-    parse: dict[str, ParseResult]
+    protocols: Optional[ProtocolFormat] = None
+    command: Optional[ProtocolCommand] = None
+    parse: Optional[dict[str, ParseResult]] = None
+
+    @field_validator("protocols", "command", "parse", mode="before")
+    @classmethod
+    def validate_nullable_fields(cls, v: Any) -> Any:
+        """将字符串'None'转换为Python None"""
+        if v == 'None' or v is None:
+            return None
+        return v
 
     @field_validator("channels", mode="before")
     @classmethod
-    def validate_channels(cls, v: Any) -> ChannelConfig:
-        """将字典转换为ChannelConfig实例"""
+    def validate_channels(cls, v: dict[str, Optional[Union[str, list[str], dict[str, Any]]]]) -> ChannelConfig:
+        """将字典转换为ChannelConfig实例，并自动转换Modbus通道"""
         if isinstance(v, ChannelConfig):
             return v
-        if isinstance(v, dict):
-            return ChannelConfig(v) # type: ignore
+        if isinstance(v, dict): # type: ignore
+            result: dict[str, Channel] = {}
+            for category, channels in v.items(): 
+                if isinstance(channels, str):
+                    result[category] = channels
+                elif isinstance(channels, list):
+                    result[category] = channels
+                elif isinstance(channels, dict): # type: ignore
+                    # 将dict转换为ModbusChannel
+                    result[category] = ModbusChannel(channels)
+                else:
+                    raise ValueError(f"通道{category}中包含未知类型数据")
+            return ChannelConfig(result)
         raise ValueError("channels必须是字典或ChannelConfig实例")
+
+    @field_validator("enums", mode="before")
+    @classmethod
+    def validate_enums(cls, v: dict[str, Any]) -> Enums:
+        """将整型、浮点型枚举键转换为字符串"""
+        result: Enums = {}
+        for group_name, enum_def in v.items():
+            if isinstance(enum_def, dict):
+                converted:EnumDefinition = {}
+
+                for k, val in enum_def.items(): # type: ignore
+                    converted[str(k)] = str(val) # type: ignore
+
+                result[str(group_name)] = converted
+        return result
 
     # 表达式引擎占位符
     EXPRESSION_VARS: ClassVar[dict[str, str]] = {

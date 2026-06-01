@@ -1,8 +1,159 @@
 # DeviceHub 工业设备监控网关
+
 基于 Python FastAPI 的工业设备数据采集、监控和控制网关服务。支持通过 TCP 协议与多种工业设备（温控仪、压力计、流量计、泵等）通信，提供 WebSocket 实时数据推送和 HTTP 历史数据查询接口。
 [->bilibili演示视频](https://b23.tv/BV1Sn9eBLEzF)
 
+## 示意图
+
+### 架构图
+
+```mermaid
+graph TB
+    subgraph Frontend["🎨 前端层"]
+        UI[index.html<br/>CSS / JS]
+    end
+
+    subgraph API["🔌 API层"]
+        HTTP[HTTP REST API<br/>历史数据查询/系统管理]
+        WS[WebSocket服务<br/>实时数据推送/控制指令]
+    end
+
+    subgraph Service["⚙️ 服务层"]
+        Factory[协议工厂 factory.py<br/>动态创建协议实例]
+        
+        subgraph Protocols["协议实现"]
+            TCP[TcpProtocol<br/>ASCII文本协议]
+            MOD[ModbusTcpProtocol<br/>Modbus TCP协议]
+            MORE[待实现协议<br/>ModbusRTU/USB串口]
+        end
+        
+        subgraph SubModules["协议子模块"]
+            Base[base/<br/>基类定义]
+            Builder[builder/<br/>命令构建]
+            Conn[connection/<br/>设备连接]
+            Handler[handler/<br/>逻辑处理]
+            Parser[parser/<br/>命令解析]
+        end
+        
+        subgraph DataProcess["数据处理"]
+            Realtime[实时数据<br/>缓存]
+            History[历史数据<br/>SQLite3时序存储]
+        end
+    end
+
+    subgraph ProtocolLayer["📡 协议层"]
+        Device1[温控仪/压力计<br/>TCP设备]
+        Device2[PLC/仪表<br/>Modbus TCP设备]
+        Device3[更多工业设备<br/>流量计/泵/变频器]
+    end
+
+    subgraph Config["📁 配置驱动"]
+        YAML[config/protocols/<br/>YAML设备定义+协议规则]
+    end
+
+    subgraph Storage["💾 数据存储"]
+        DB[(data/2026/<br/>SQLite3)]
+        subgraph Tables["表结构"]
+            T1[高频监控表]
+            T2[低频状态表]
+            T3[静态信息表]
+            T4[控制日志表]
+        end
+    end
+
+    %% 连接关系
+    UI -->|HTTP/WS| HTTP
+    UI -->|HTTP/WS| WS
+    
+    HTTP --> Factory
+    WS --> Factory
+    
+    Factory --> TCP
+    Factory --> MOD
+    Factory --> MORE
+    
+    TCP --> SubModules
+    MOD --> SubModules
+    MORE --> SubModules
+    
+    SubModules --> Device1
+    SubModules --> Device2
+    SubModules --> Device3
+    
+    Factory --> DataProcess
+    DataProcess --> History
+    DataProcess --> Realtime
+    Realtime --> WS
+    
+    History --> DB
+    DB --> Tables
+    
+    YAML -.->|配置加载| Factory
+    YAML -.->|协议规则| SubModules
+
+    %% 样式定义
+    classDef frontend fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef api fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef service fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef protocol fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef config fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+    
+    class UI frontend
+    class HTTP,WS api
+    class Factory,Realtime,History service
+    class TCP,MOD,MORE,Base,Builder,Conn,Handler,Parser protocol
+    class Device1,Device2,Device3 protocol
+    class YAML config
+    class DB,T1,T2,T3,T4 storage
+```
+
+### 数据流
+
+```mermaid
+sequenceDiagram
+    participant Web as Web前端
+    participant API as HTTP/WS API
+    participant Factory as 设备管理器
+    participant Protocol as 协议实例
+    participant Device as 工业设备
+    participant Cache as 实时缓存
+    participant DB as SQLite3
+
+    rect rgb(200, 230, 255)
+        Note over Web,Device: ① 设备控制流程
+        Web->>API: WebSocket 控制指令
+        API->>Factory: 获取协议实例
+        Factory->>Protocol: 转发指令
+        Protocol->>Device: TCP/Modbus 发送
+        Device-->>Protocol: 响应数据
+        Protocol-->>API: 返回结果
+        API-->>Web: WebSocket 推送响应
+    end
+
+    rect rgb(255, 230, 200)
+        Note over Device,Web: ② 实时数据采集流程 (轮询)
+        loop 每秒采集
+            Protocol->>Device: 轮询读取
+            Device-->>Protocol: 设备数据
+            Protocol->>Cache: 更新实时数据
+            Cache->>DB: 写入高频监控表
+            Cache-->>API: 推送数据
+            API-->>Web: WebSocket 广播
+        end
+    end
+
+    rect rgb(230, 255, 230)
+        Note over Web,DB: ③ 历史查询流程
+        Web->>API: HTTP GET /history
+        API->>DB: 时序查询
+        DB-->>API: 返回数据
+        API-->>Web: JSON 响应
+    end
+```
+
 ## 特性
+
 1. 架构设计
    1. 分层架构：清晰的协议层、服务层、API层分离
    2. 模块化扩展：易于添加新设备类型和通信协议
@@ -27,7 +178,7 @@
 ## 快速开始
 
 1. 环境要求
-   Python 3.10+(构建版本为3.14)
+   Python 3.10+(开发版本为Python 3.14.2)
 2. 安装步骤
    1. 克隆项目仓库(或直接下载项目压缩包)
    ```
@@ -88,26 +239,26 @@
    └─ types
 ```
 
-## 热更新功能
-系统支持配置文件热更新：
-1. 协议配置：修改 config/protocols/下的YAML文件，自动重新加载 (已实现)
-2. 设备配置：修改 config/devices.yaml，自动应用新配置 (待实现)
-3. 系统配置：修改 config/system.yaml，自动重启 (待实现)
-
 ## 许可证
+
 ### 当前许可证
+
 本项目采用 **[Apache License 2.0](LICENSE)** 开源许可证发布。
 
 ### 商业合作
+
 如有商业合作需求（定制开发、技术支持、企业部署等），请联系：[Rnscreen](mailto:rainscreen12@outlook.com)
 
 ### 免责声明
+
 ⚠️ **重要提示**：
+
 1. 本项目仍在积极开发中，API 和功能可能发生变化
 2. 为支持项目可持续发展，未来可能引入商业授权功能
 3. 具体法律条款以 [LICENSE](LICENSE) 文件为准
 
----
+***
+
 版本: V0.1.2
 最后更新: 2026年4月29日
-DeviceHub - 让设备接入更简单(bushi)~
+DeviceHub - 让设备接入更简单(bushi)\~

@@ -41,7 +41,7 @@ class TcpConnection(IConnection):
             except Exception as e:
                 raise ConnectionError(f"Failed to connect to {self.config.host}:{self.config.port}: {e}")
     
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> bool:
         """断开TCP连接"""
         if self._writer:
             try:
@@ -49,13 +49,16 @@ class TcpConnection(IConnection):
                 await asyncio.wait_for(self._writer.wait_closed(), timeout=self.timeout)
             except Exception as e:
                 self.logger.warning(f"Error closing connection: {e}")
+                return False
             finally:
                 self._writer = None
                 self._reader = None
                 self._connected = False
                 self.logger.info("Disconnected")
+        
+        return True
     
-    async def clear(self) -> None:
+    async def clear(self) -> bool:
         """清除reader缓存"""
         if self._reader:
             try:
@@ -65,46 +68,93 @@ class TcpConnection(IConnection):
                 )
             except Exception as e:
                 self.logger.warning(f"Error clearing cache: {e}")
+                return False
+        return True
 
-    async def send(self, data: bytes) -> None:
+    async def send(self, data: bytes) -> bool:
         """发送原始数据"""
         if not self._connected or not self._writer:
-            raise ConnectionError("Not connected")
+            await self.disconnect()
+            self.logger.warning("Not connected, cannot send data")
+            try:
+                for _ in range(3):
+                    await self.connect()
+                    break
+            except ConnectionError:
+                self.logger.error("Failed to reconnect, cannot send data")
+                await self.disconnect()
+                return False
         
-        try:            
+        if self._writer is None:
+            return False
+
+        try: 
             self._writer.write(data)
             await self._writer.drain()
-            self.logger.debug(f"Sent: {data}")
+            # self.logger.debug(f"Sent: {data}")
+            return True
         except Exception as e:
-            self._connected = False
-            raise ConnectionError(f"Failed to send data: {e}")
+            await self.disconnect()
+            self.logger.error(f"Failed to send data: {e}, try reconnect")
+            return False
     
-    async def receive(self) -> bytes:
-        """接收数据直到超时"""
+    async def receive(self, length: int = 4096) -> bytes:
+        """接收数据
+        Args:
+            length: 接收数据长度, 默认4096字节
+        
+        Returns:
+            bytes: 接收的原始数据，失败时返回 b''
+        """
         if not self._connected or not self._reader:
-            raise ConnectionError("Not connected")
+            self.logger.warning("Not connected, cannot receive data")
+            await self.disconnect()
+            try:
+                for _ in range(3):
+                    await self.connect()
+                    if self._connected:
+                        break
+            except ConnectionError:
+                self.logger.error("Failed to reconnect, cannot receive data")
+                await self.disconnect()
+            return b''
         
         try:
             data = await asyncio.wait_for(
-                self._reader.read(4096),
+                self._reader.read(length),
                 timeout=self.timeout
             )
             if not data:
                 self._connected = False
-                raise ConnectionError("Connection closed by peer")
+                self.logger.warning("Connection closed by peer")
+                return b''
             
             self.logger.debug(f"Received: {data}")
             return data
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Receive timeout after {self.timeout}s")
+            self.logger.warning(f"Receive timeout after {self.timeout}s")
+            return b''
         except Exception as e:
             self._connected = False
-            raise ConnectionError(f"Failed to receive data: {e}")
+            self.logger.error(f"Failed to receive data: {e}")
+            await self.disconnect()
+            return b''
 
     async def read_until(self, terminator: Union[bytes, str] = b"\r\n") -> bytes:
         """读取直到遇到终止符 (用于ASCII协议)"""
         if not self._connected or not self._reader:
-            raise ConnectionError("Not connected")
+            await self.disconnect()
+            self.logger.warning("Not connected, cannot read until terminator")
+            try:
+                for _ in range(3):
+                    await self.connect()
+                    break
+                else:
+                    self.logger.error("Failed to reconnect, cannot read until terminator")
+                    return b''
+            except ConnectionError:
+                self.logger.error("Failed to reconnect, cannot read until terminator")
+                return b''
         
         if isinstance(terminator, str):
             terminator = terminator.encode('utf-8')
@@ -113,7 +163,7 @@ class TcpConnection(IConnection):
         try:
             while True:
                 chunk = await asyncio.wait_for(
-                    self._reader.read(256),
+                    self._reader.read(256), # type: ignore
                     timeout = self.timeout
                 )
                 if not chunk:
@@ -130,7 +180,8 @@ class TcpConnection(IConnection):
                 if len(buffer) > 8192:
                     raise BufferError("Response buffer overflow")
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Read until timeout after {self.timeout}s")
+            self.logger.error(f"Read until timeout after {self.timeout}s")
+            return b''
         
     @property
     def is_connected(self) -> bool:

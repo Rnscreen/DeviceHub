@@ -23,6 +23,8 @@ class AsciiResponseParser(IResponseParser):
     
     def _precompile_parse_steps(self):
         """预编译所有解析步骤"""
+        if not self._parse_config:
+            return
         for parse_name, parse_def in self._parse_config.items():
             compiled_steps: list[Callable[[list[str], str], list[str]]] = []
             
@@ -142,18 +144,29 @@ class AsciiResponseParser(IResponseParser):
                 data_name = cmd_key[4:]
             else:
                 data_name = cmd_key
-                
-            data_config = cmd_key in self._parse_config
-            
-            if data_config:
-                # 执行解析
-                parsed_data = self._execute_parse(cmd_key, response)
-                
-                # 将结果添加到列表中
-                results.append((data_name,parsed_data))
+
+            # 查找解析方法
+            if isinstance(self._parse_config, dict):
+                # 查找解析方法
+                # 如果cmd_key在_parse_config中, 则使用该键
+                # 如果不存在, 则使用get_default键
+                # parse_key = self._parse_config.get(cmd_key,
+                #             self._parse_config.get("get_default",
+                #                                 None ))
+                parse_key =(cmd_key if cmd_key in self._parse_config else 
+                            "get_default" if "get_default" in self._parse_config else 
+                            None)
+
+                if parse_key is not None:
+                    # 执行解析
+                    parsed_data = self._execute_parse(parse_key, response)
+                    # 将结果添加到列表中
+                    results.append((data_name,parsed_data))
+                else:
+                    self.logger.warning(f"No parse method found for {cmd_key}, using original response")
+                    results.append((data_name,response))
             else:
-                results.append((data_name,None))
-        
+                continue
         return results
 
     def parse_control_response(self,
@@ -193,7 +206,7 @@ class AsciiResponseParser(IResponseParser):
     def _execute_parse(self, parse_key: str, ori_response: str) -> Union[dict[str, Any],int,float,str,bool,None]:
         """执行预编译的解析步骤"""
         # 获取 protocol_config中的错误匹配模板
-        if (error_template := self.protocol_config.protocols.error):
+        if (error_template := getattr(self.protocol_config.protocols, "error", None)):
             # 将模板转换为正则表达式
             from ....utils.template_to_regex import template_to_regex
             error_regex = template_to_regex(error_template)
@@ -203,7 +216,7 @@ class AsciiResponseParser(IResponseParser):
                 return False
 
         # 获取 protocol_config中的响应匹配模板
-        if (response_template := self.protocol_config.protocols.response):
+        if (response_template := getattr(self.protocol_config.protocols, "response", None)):
             # 将模板转换为正则表达式
             from ....utils.template_to_regex import template_to_regex
             response_regex = template_to_regex(response_template)

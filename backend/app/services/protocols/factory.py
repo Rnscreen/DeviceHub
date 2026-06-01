@@ -10,7 +10,7 @@ from .builder.factory import CommandBuilderFactory
 from .parser.factory import ResponseParserFactory
 from typing import Type
 from .tcp  import TcpProtocol
-# from .modbus_tcp import ModbusTcpProtocol
+from .modbus_tcp import ModbusTcpProtocol
 # from .modbus_rtu import ModbusRtuProtocol
 # from .serial import SerialProtocol
 
@@ -20,7 +20,7 @@ logger = Logger(__name__)
 class ProtocolFactory:
     _protocol_classes:dict[ProtocolType,Type[IDeviceProtocol]] = {
         ProtocolType.TCP: TcpProtocol,
-        # ProtocolType.MODBUS_TCP: ModbusTcpProtocol,
+        ProtocolType.MODBUS_TCP: ModbusTcpProtocol,
         # ProtocolType.ModbusRTU: ModbusRtuProtocol,
         # ProtocolType.Serial: SerialProtocol,
         # 其他协议...

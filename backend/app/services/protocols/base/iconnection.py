@@ -22,7 +22,7 @@ class IConnection(ABC):
         pass
     
     @abstractmethod
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> bool:
         """断开连接
         Notes:
             - 断开后, 应设置self._connected为False
@@ -30,12 +30,12 @@ class IConnection(ABC):
         pass
     
     @abstractmethod
-    async def send(self, data: bytes) -> None:
+    async def send(self, data: bytes) -> bool:
         """发送原始数据"""
         pass
 
     @abstractmethod
-    async def clear(self) -> None:
+    async def clear(self) -> bool:
         """清除缓存"""
         pass
     
@@ -46,6 +46,12 @@ class IConnection(ABC):
             - 需要使用self.timeout作为超时时间
         """
         pass
+    
+    async def reconnect(self) -> bool:
+        """重新连接"""
+        if await self.disconnect():
+            return await self.connect()
+        return False
 
     async def send_command(self, data: Any) -> Any:
         """发送并接收响应（默认实现）"""

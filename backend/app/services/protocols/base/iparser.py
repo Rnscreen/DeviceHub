@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from ....models import ProtocolConfig, ParseResult
 
 class IResponseParser(ABC):
-    """响应解析器抽象基类 - 重新设计版本"""
+    """响应解析器抽象基类"""
     
     def __init__(self, protocol_config: ProtocolConfig):
         self.protocol_config = protocol_config

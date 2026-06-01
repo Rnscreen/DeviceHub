@@ -113,8 +113,15 @@ export class Utils {
             const [num, exp] = value.split('E');
             return `${parseFloat(num).toFixed(2)}×10<sup>${exp}</sup>`;
         } else if (typeof value === 'number') {
-            if (Math.abs(value) < 0.001 || Math.abs(value) > 1000) {
+            if (value === 0) {
+                return 0;
+            }
+            if (Math.abs(value) < 0.001 || Math.abs(value) > 10000) {
                 return value.toExponential(2);
+            }
+            // 检查是否为整数
+            if (Number.isInteger(value)) {
+                return value;
             }
             return value.toFixed(2);
         }

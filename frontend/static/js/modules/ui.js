@@ -7,6 +7,13 @@ export class UIManager {
         this.initializeElements();
         this.logEntries = [];
         this.maxLogEntries = 50;
+        this.currentDeviceData = null;
+        // 缓存已渲染的数据，用于增量更新
+        this.renderedDataCache = {
+            deviceId: null,           // 当前渲染的设备ID
+            cardMap: new Map(),       // key: category, value: 对应的 DOM 元素引用
+            valuesMap: new Map()      // key: dataKey, value: 最后一次渲染的值
+        };
     }
 
     // 初始化DOM元素
@@ -16,7 +23,7 @@ export class UIManager {
             statusText: document.getElementById('statusText'),
             deviceCount: document.getElementById('deviceCount'),
             lastUpdate: document.getElementById('lastUpdate'),
-            wsUrl: document.getElementById('wsUrl'),
+            serverUrl: document.getElementById('serverUrl'),
             deviceList: document.getElementById('deviceList'),
             currentDevice: document.getElementById('currentDevice'),
             dataDisplay: document.getElementById('dataDisplay'),
@@ -42,13 +49,25 @@ export class UIManager {
             return;
         }
 
+        // 包装 onDeviceSelect，添加展开/收起逻辑
+        const wrappedOnDeviceSelect = (deviceId) => {
+            this.toggleDeviceDetails(deviceId, true);
+            if (onDeviceSelect) {
+                onDeviceSelect(deviceId);
+            }
+        };
+
         Object.values(devices).forEach(device => {
-            const deviceElement = this.createDeviceElement(device, onDeviceSelect, onDeviceDisconnect);
+            const deviceElement = this.createDeviceElement(
+                device, 
+                wrappedOnDeviceSelect, 
+                onDeviceDisconnect
+            );
             deviceList.appendChild(deviceElement);
         });
     }
 
-    // 修改创建设备元素的方法
+    // 创建设备元素的方法
     createDeviceElement(device, onDeviceSelect, onDeviceDisconnect) {
         const deviceElement = document.createElement('div');
 
@@ -63,23 +82,23 @@ export class UIManager {
                 <i class="${statusInfo.icon} ${statusInfo.class}" 
                 title="${statusInfo.class === 'offline' ? '离线, 点击设备连接': '已禁用'}"></i>
             </div>
-            <div class="device-type">${Utils.formatDeviceType(device.type)} - ${device.vendor}</div>
-            <div class="device-tags">
-                ${Object.entries(device.tags).map(([key, value]) => 
-                    `<span class="tag">${key}: ${value}</span>`
-                ).join('')}
+            <div class="device-details" style="display: none;">
+                <div class="device-type">${Utils.formatDeviceType(device.type)} - ${device.vendor}</div>
+                <div class="device-tags">
+                    ${Object.entries(device.tags).map(([key, value]) => 
+                        `<span class="tag">${key}: ${value}</span>`
+                    ).join('')}
+                </div>
+                ${device.description ? `<div class="device-desc">${device.description}</div>` : ''}
             </div>
-            <div class="device-status status-${statusInfo.class}">
-                ${statusInfo.text}
-            </div>
-            ${device.description ? `<div class="device-desc">${device.description}</div>` : ''}
         `;
 
         if (device.enabled) {
             // 整个设备项点击选择
             deviceElement.addEventListener('click', (event) => {
                 const icon = event.target.closest('i');
-                if (icon && device.status === 'online'){// 点击了图标，执行断开连接
+                if (icon && device.status === 'online') {
+                    // 点击了图标，执行断开连接
                     event.stopPropagation();
                     onDeviceDisconnect(device.id);
                 } else {
@@ -96,46 +115,56 @@ export class UIManager {
         return deviceElement;
     }
 
-    updateDeviceStatus(deviceId, status){
+    // 添加：切换设备详细信息显示
+    toggleDeviceDetails(deviceId, showDetails) {
         const deviceElement = this.elements.deviceList.querySelector(`[data-device-id="${deviceId}"]`);
-        const statusTag = deviceElement.querySelector(`.device-status`);
-        const Icon = deviceElement.querySelector('i');
+        if (!deviceElement) return;
 
-        const device_status = status;//`status-${status}`;
+        // 先隐藏所有设备的详细信息
+        const allDetails = this.elements.deviceList.querySelectorAll('.device-details');
+        allDetails.forEach(detail => {
+            detail.style.display = 'none';
+        });
 
-        if (!statusTag) {
-            return;
+        // 移除所有设备的选中状态
+        const allDevices = this.elements.deviceList.querySelectorAll('.device-item');
+        allDevices.forEach(device => {
+            device.classList.remove('selected');
+        });
+
+        // 显示当前设备的详细信息
+        if (showDetails) {
+            const details = deviceElement.querySelector('.device-details');
+            if (details) {
+                details.style.display = 'block';
+            }
+            deviceElement.classList.add('selected');
         }
+    }
 
-        switch(status){
+    updateDeviceStatus(deviceId, status) {
+        const deviceElement = this.elements.deviceList.querySelector(`[data-device-id="${deviceId}"]`);
+        if (!deviceElement) return;
+
+        const icon = deviceElement.querySelector('i');
+        if (!icon) return;
+
+        switch(status) {
             case "online":
-                statusTag.className = 'device-status status-online';
-                statusTag.textContent = '在线';
-
-                Icon.title = '已连接, 再次点击断开';
-
+                icon.className = 'circle online';
+                icon.title = '已连接, 再次点击断开';
                 break;
             case "offline":
-                statusTag.className = 'device-status status-offline';
-                statusTag.textContent = '离线';
-
-                Icon.title = '已断开, 点击设备以连接';
-
+                icon.className = 'circle offline';
+                icon.title = '已断开, 点击设备以连接';
                 break;
             case "disabled":
-                statusTag.addEventListener('click', () => null);
-                statusTag.style.opacity = '0.6';
-                statusTag.style.cursor = 'not-allowed';
-
-                Icon.title = '已禁用, 请检查服务端配置';
+                icon.className = 'circle disabled';
+                icon.title = '已禁用, 请检查服务端配置';
                 break;
             default:
                 break;
         }
-
-        //更改图标显示
-        Icon.className = `circle ${device_status}`;
-
     }
 
     // 获取设备状态信息
@@ -196,21 +225,102 @@ export class UIManager {
     updateDeviceDisplay(device) {
         if (!device) {
             this.showNoDataMessage();
-            this.hideAllCharts(); // 隐藏所有图表
+            this.hideAllCharts();
+            this.currentDeviceData = null;
+            this.renderedDataCache.deviceId = null;
+            this.renderedDataCache.cardMap.clear();
+            this.renderedDataCache.valuesMap.clear();
             return;
         }
 
-        this.elements.dataDisplay.innerHTML = '';
-
-        //创建设备信息卡片，已取消
-        //this.elements.dataDisplay.appendChild(this.createDeviceInfoCard(device));
+        this.currentDeviceData = device.data;
         
-        Object.entries(device.data).forEach(([key, data]) => {
-            this.elements.dataDisplay.appendChild(this.createDataCard(key, data, device));
+        // 判断是否需要完全重建
+        const needFullRebuild = 
+            this.renderedDataCache.deviceId !== device.id ||  // 切换了设备
+            this.renderedDataCache.cardMap.size === 0;         // 首次渲染
+        
+        if (needFullRebuild) {
+            // 完全重建 DOM
+            this.elements.dataDisplay.innerHTML = '';
+            this.createDataCardByTag(device.data);
+            
+            // 缓存 DOM 引用
+            this.cacheRenderedCards();
+            
+            // 更新图表标题
+            this.updateAllChartTitles(device);
+        } else {
+            // 增量更新值（同设备，仅数据值变化）
+            this.updateDataValues(device.data);
+            
+            // 更新图表标题
+            this.updateAllChartTitles(device);
+        }
+        
+        // 更新缓存
+        this.renderedDataCache.deviceId = device.id;
+        
+        // 显示图表
+        this.showDeviceChart(device.id);
+    }
+
+    // 更新所有图表标题
+    updateAllChartTitles(device) {
+        if (!device || !device.data) return;
+        
+        const typeGroups = this.groupDataByType(device.data);
+        
+        Object.keys(typeGroups).forEach(dataType => {
+            this.updateChartTitle(device.id, dataType, device.data);
+        });
+    }
+
+    cacheRenderedCards() {
+        this.renderedDataCache.cardMap.clear();
+        
+        const cards = this.elements.dataDisplay.querySelectorAll('.data-card.grouped-card');
+        cards.forEach(card => {
+            const category = card.getAttribute('data-category') || 
+                            card.querySelector('.card-header')?.textContent;
+            if (category) {
+                this.renderedDataCache.cardMap.set(category, card);
+            }
+        });
+    }
+
+    updateDataValues(deviceData) {
+        let hasChanges = false;
+        
+        Object.entries(deviceData).forEach(([key, data]) => {
+            const lastValue = this.renderedDataCache.valuesMap.get(key);
+            
+            // 仅在值真正变化时才更新 DOM
+            if (lastValue !== data.value) {
+                // 查找对应的 DOM 元素
+                const valueElement = this.elements.dataDisplay.querySelector(
+                    `[data-key="${CSS.escape(key)}"] .data-value`
+                );
+                
+                if (valueElement) {
+                    valueElement.textContent = Utils.formatDisplayValue(data.value);
+                    // 添加闪烁效果提示值变化
+                    valueElement.classList.add('value-updated');
+                    setTimeout(() => valueElement.classList.remove('value-updated'), 600);
+                }
+                
+                this.renderedDataCache.valuesMap.set(key, data.value);
+                hasChanges = true;
+            }
         });
         
-        // 显示当前设备的图表，隐藏其他设备的图表
-        this.showDeviceChart(device.id);
+        // 如果有任何数据变化，更新图表标题
+        if (hasChanges && this.renderedDataCache.deviceId) {
+            this.updateAllChartTitles({
+                id: this.renderedDataCache.deviceId,
+                data: deviceData
+            });
+        }
     }
 
     // 添加：显示特定设备的图表
@@ -261,12 +371,22 @@ export class UIManager {
             chartContainer.dataset.dataType = dataType;
             chartContainer.style.display = 'none';
             
+            // 构建初始的 channel:value 显示
+            const valueDisplay = dataEntries
+                .map(entry => {
+                    const channel = entry.data.channel || entry.key;
+                    const value = Utils.formatDisplayValue(entry.data.value);
+                    const unit = entry.data.unit || '';
+                    return `${channel}: ${value}${unit ? ' ' + unit : ''}`;
+                })
+                .join('  |  ');
+            
             chartContainer.innerHTML = `
                 <div class="chart-header">
-                    <div class="chart-title">${device.name} - ${Utils.getValueType(dataType)}</div>
-                    <div class="chart-legend" id="legend-${device.id}-${dataType}"></div>
+                    <div class="chart-title" data-chart-title="${device.id}-${dataType}">${Utils.getValueType(dataType)}</div>
+                    <div class="chart-value" data-chart-value="${device.id}-${dataType}">${valueDisplay}</div>
                 </div>
-                <div class="chart-content" id="chart-${device.id}-${dataType}" style="height: 280px;"></div>
+                <div class="chart-content" id="chart-${device.id}-${dataType}" style="height: 300px;"></div>
             `;
             
             chartContainers.push(chartContainer);
@@ -274,6 +394,33 @@ export class UIManager {
         
         return chartContainers;
     }
+    // 添加：更新图表标题显示
+    updateChartTitle(deviceId, dataType, deviceData) {
+        const valueElement = document.querySelector(`[data-chart-value="${deviceId}-${dataType}"]`);
+        if (!valueElement) return;
+        
+        // 按数据类型过滤相关数据
+        const typeData = {};
+        Object.entries(deviceData).forEach(([key, data]) => {
+            const currentDataType = key.split('.')[0];
+            if (currentDataType === dataType) {
+                typeData[key] = data;
+            }
+        });
+        
+        // 构建显示文本
+        const valueDisplay = Object.entries(typeData)
+            .map(([key, data]) => {
+                const channel = data.channel || key;
+                const value = Utils.formatDisplayValue(data.value);
+                const unit = data.unit || '';
+                return `${channel}: ${value}${unit ? ' ' + unit : ''}`;
+            })
+            .join('  |  ');
+        
+        valueElement.textContent = valueDisplay || '无数据';
+    }
+
 
     // 添加：按数据类型分组
     groupDataByType(deviceData) {
@@ -289,19 +436,6 @@ export class UIManager {
         });
         
         return groups;
-    }
-
-    // 修改：显示设备图表
-    showDeviceChart(deviceId) {
-        const allCharts = this.elements.chartsContainer.querySelectorAll('.device-chart');
-        
-        allCharts.forEach(chart => {
-            if (chart.dataset.deviceId === deviceId) {
-                chart.style.display = 'block';
-            } else {
-                chart.style.display = 'none';
-            }
-        });
     }
 
     // 创建设备信息卡片
@@ -334,6 +468,61 @@ export class UIManager {
         `;
         return dataCard;
     }
+
+    // 创建数据卡片按data_tag, 即data.category分组显示
+    createDataCardByTag(data) {
+    const groupedData = {};
+    
+    Object.entries(data).forEach(([key, item]) => {
+        const category = item.category || '未分类';
+        if (!groupedData[category]) {
+            groupedData[category] = [];
+        }
+        groupedData[category].push({
+            key: key,
+            ...item
+        });
+    });
+
+    Object.entries(groupedData).forEach(([category, items]) => {
+        const dataCard = document.createElement('div');
+        dataCard.className = 'data-card grouped-card';
+        dataCard.setAttribute('data-category', category); // 标记分类
+        
+        const cardHeader = document.createElement('div');
+        cardHeader.className = 'card-header';
+        cardHeader.textContent = category;
+        dataCard.appendChild(cardHeader);
+        
+        const cardBody = document.createElement('div');
+        cardBody.className = 'card-body';
+        
+        items.forEach(item => {
+            const dataRow = document.createElement('div');
+            dataRow.className = 'data-row';
+            dataRow.setAttribute('data-key', item.key); // 标记数据键
+            
+            const channelLabel = item.channel 
+                ? `<span class="channel-label">${item.channel}</span>` 
+                : '';
+            
+            dataRow.innerHTML = `
+                <div class="row-label">
+                    ${channelLabel}
+                </div>
+                <div class="row-value">
+                    <span class="data-value">${Utils.formatDisplayValue(item.value)}</span>
+                    ${item.unit ? `<span class="data-unit">${item.unit}</span>` : ''}
+                </div>
+            `;
+            
+            cardBody.appendChild(dataRow);
+        });
+        
+        dataCard.appendChild(cardBody);
+        this.elements.dataDisplay.appendChild(dataCard);
+    });
+}
 
     // 获取数据卡片样式类
     getDataCardClass(key) {
@@ -640,10 +829,7 @@ export class UIManager {
         logPanel.scrollTop = logPanel.scrollHeight;
     }
 
-    // 获取WebSocket URL
-    getWsUrl() {
-        return this.elements.wsUrl.value;
-    }
+
 
     // 获取控制输入值
     getControlValues() {

@@ -213,22 +213,24 @@ class Settings(BaseSettings):
         
         if file_path_obj == self.SYSTEM_CONFIG_PATH:
             logger.info(f"检测到 system.yaml 变化，正在重启...")
-            self.restart_app()
+            pass
+            # self.restart_app()
             
             
         elif file_path_obj == self.DEVICE_CONFIG_PATH:
             logger.info(f"检测到 devices.yaml 变化，重新加载...")
-            self._devicehub_config = None
-            self._load_configs()
-            try:
-                # 重启poll服务
-                # from ..services import polling_service
-                # polling_service.restart_polling_sync()
-                self.restart_app()
-            except Exception as e:
-                logger.error(f"配置重载回调执行失败: {e}")
-                return
-            logger.info("✅ devices.yaml 已重新加载")
+            pass #暂不实现
+            # self._devicehub_config = None
+            # self._load_configs()
+            # try:
+            #     # 重启poll服务
+            #     # from ..services import polling_service
+            #     # polling_service.restart_polling_sync()
+            #     self.restart_app()
+            # except Exception as e:
+            #     logger.error(f"配置重载回调执行失败: {e}")
+            #     return
+            # logger.info("✅ devices.yaml 已重新加载")
     
     def enable_hot_reload(self) -> None:
         """启用配置文件热重载"""

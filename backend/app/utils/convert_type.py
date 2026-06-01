@@ -13,9 +13,11 @@ def convert_type(value: Any, target_type: Optional[str]='str') -> Any:
         ValueError: 当目标类型不支持或转换失败时
     """
     result:Any = None
+    if value is None:
+        return None
     if target_type is None:
         target_type = 'str'
-    if isinstance(value, str):
+    else:
         match target_type.lower():
             case "int":
                 try:
@@ -30,13 +32,16 @@ def convert_type(value: Any, target_type: Optional[str]='str') -> Any:
             case "str":
                 result = str(value)
             case "bool":
-                if value.lower() in ("true","True", "1"):
-                    result = True
+                if isinstance(value, bool):
+                    result = value
+                elif isinstance(value, str):
+                    if value.lower() in ("true","True", "1"):
+                        result = True
+                    else:
+                        result = False
                 else:
                     result = False
             case _:
                 # 其他类型保持不变
                 result = value
-    else:
-        result = value
     return result

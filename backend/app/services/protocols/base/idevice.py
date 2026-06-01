@@ -14,9 +14,9 @@ from ....models import (
     DataCategory,
     DataFrame,
     DataType,
+    DataCache,
     DataTypeLayer,
     DeviceConfig,
-    DataCache,
     PollDataType,
     ProtocolConfig,
     EnabledChannels,
@@ -51,20 +51,22 @@ class IDeviceProtocol:
 
         self.logger = Logger(self.device_config.id)    # 生成日志
 
+        # 初始化通道信息
         # 初始化缓存数据
-        self._data_cache = DataCache(self.protocol_config, self.device_config)
-
+        self._data_cache = DataCache(protocol, config)
+        # 初始化启用通道信息
+        # from ....utils.enabled_channel import init_enabled_channels
+        # self.device_config.enabled_channels = init_enabled_channels(self.protocol_config,self.device_config)
+        # 协议支持的所有通道
+        self._channels = protocol.channels 
+        # 启用通道信息
+        self._enabled_channels = self.device_config.enabled_channels
+        
         # 初始化轮询参数
         self._poll_counter:list[int] = [-1,-1]
         self._poll_config = config.poll
         self._last_poll_time = PollTime()
         self._is_ready:bool = True    #是否需要poll info信息
-
-        # 初始化通道信息
-        self._channels = protocol.channels 
-        self._enabled_channels = config.enabled_channels
-        if self._enabled_channels is None:
-            self._enabled_channels = self._channels.all_channels
 
         # 初始化协议枚举键值
         self._enum = protocol.enums
@@ -147,12 +149,12 @@ class IDeviceProtocol:
     def _should_poll_slow(self) -> bool:
         """基于计数的轮询判断"""
         self._poll_counter[0] = (self._poll_counter[0] + 1) % self._poll_config.poll_slow
-        return self._poll_counter[0] == 1 and bool(self.protocol_config.data.get(PollDataType.MONITOR_SLOW,False))
+        return self._poll_counter[0] == 0 and bool(self.protocol_config.data.get(PollDataType.MONITOR_SLOW,False))
 
     def _should_poll_status(self) -> bool:
         """基于计数的轮询判断"""
         self._poll_counter[1] = (self._poll_counter[1] + 1) % self._poll_config.poll_status
-        return self._poll_counter[1] == 1 and bool(self.protocol_config.data.get(PollDataType.STATUS,False))
+        return self._poll_counter[1] == 0 and bool(self.protocol_config.data.get(PollDataType.STATUS,False))
 
     async def update_by_datatype(self, poll_data_type: PollDataType) -> DataTypeLayer:
         """更新指定数据类型的所有数据项

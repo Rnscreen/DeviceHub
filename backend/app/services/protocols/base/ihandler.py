@@ -13,7 +13,7 @@ from .ibuilder import ICommandBuilder
 from .iparser import IResponseParser
 
 class IHandler(ABC):
-    """协议处理器抽象基类 - 重新设计版本"""
+    """协议处理器抽象基类"""
     
     def __init__(self, 
                  device:IDeviceProtocol,

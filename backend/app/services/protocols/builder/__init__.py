@@ -1,1 +1,2 @@
-from .ascii import AsciiCommandBuilder # type: ignore
+from .ascii import AsciiCommandBuilder
+from .modbus import ModbusCommandBuilder

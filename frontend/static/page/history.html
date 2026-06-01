@@ -241,8 +241,6 @@
         </div>
     </div>
 
-    // ... 之前的所有HTML和CSS保持不变 ...
-
 <script>
 (function() {
     const API = `${window.location.protocol}//${window.location.host}/api/v1`;
@@ -250,6 +248,9 @@
     let currentData = null;
     let currentParams = {};
     let fieldTypesMap = {};
+    let cachedLinearData = null;   // 线性数据缓存
+    let cachedLogData = null;      // 对数数据缓存
+    let currentScale = 'log10';
 
     const deviceSelect = document.getElementById('deviceSelect');
     const fieldsContainer = document.getElementById('fieldsContainer');
@@ -265,7 +266,6 @@
     const chartInfo = document.getElementById('chartInfo');
     const recordCount = document.getElementById('recordCount');
     const scaleToggle = document.getElementById('scaleToggle');
-    let currentScale = 'log10';
 
     async function apiGet(path) {
         const resp = await fetch(`${API}${path}`);
@@ -421,15 +421,38 @@
         chartContainer.style.display = 'none';
 
         try {
+            const chartWidth = chartContainer.clientWidth || 800;
+            const maxPoints = Math.min(chartWidth * 30, 30000);
+            
             const params = new URLSearchParams({
                 fields: currentParams.fields,
                 start: currentParams.start,
-                end: currentParams.end
+                end: currentParams.end,
+                max_points: maxPoints.toString()
             });
+            
             const data = await apiGet(`/data/${encodeURIComponent(deviceId)}?${params}`);
             currentData = data;
+            
+            // ========== 新增：缓存两份数据 ==========
+            // 缓存原始数据（包含所有值，用于线性显示）
+            cachedLinearData = JSON.parse(JSON.stringify(data));
+            // 缓存对数数据（过滤掉非正值）
+            cachedLogData = JSON.parse(JSON.stringify(data));
+            // 对对数数据过滤非正值
+            if (cachedLogData.series) {
+                Object.keys(cachedLogData.series).forEach(key => {
+                    const seriesInfo = cachedLogData.series[key];
+                    if (!seriesInfo.is_sparse && seriesInfo.data) {
+                        seriesInfo.data = seriesInfo.data.filter(point => point.value > 0);
+                    }
+                });
+            }
+            // =====================================
 
-            if (!data.data || data.data.length === 0) {
+            const hasData = data.series && Object.keys(data.series).length > 0;
+            
+            if (!hasData) {
                 emptyState.style.display = 'flex';
                 emptyState.querySelector('h3').textContent = '未查询到数据';
                 emptyState.querySelector('p').textContent = '请调整时间范围或数据点后重试';
@@ -437,11 +460,23 @@
                 recordCount.textContent = '';
                 exportBtn.disabled = true;
             } else {
-                renderChart(data);
+                // 使用当前比例对应的数据渲染
+                renderChartWithCache();  // 改调用新函数
                 exportBtn.disabled = false;
+                
                 const deviceName = deviceSelect.options[deviceSelect.selectedIndex].textContent;
-                chartInfo.innerHTML = `<strong>${escapeHtml(deviceName)}</strong> | ${escapeHtml(currentParams.fields)} | ${data.count} 条记录`;
-                recordCount.textContent = `${data.data.length} 数据点`;
+                const samplingInfo = data.sampling_info || {};
+                const totalOriginal = samplingInfo.total_original_points || 0;
+                const totalSampled = samplingInfo.total_sampled_points || 0;
+                
+                // ... 其他日志和计数代码保持不变 ...
+                const sparsePoints = samplingInfo.sparse_points || 0;
+                const numericPoints = samplingInfo.numeric_points || 0;
+                let countText = `${totalSampled.toLocaleString()} 数据点`;
+                if (sparsePoints > 0) {
+                    countText += ` (数值: ${numericPoints.toLocaleString()}, 标签: ${sparsePoints})`;
+                }
+                recordCount.textContent = countText;
             }
         } catch (e) {
             emptyState.style.display = 'flex';
@@ -453,7 +488,7 @@
             loadingOverlay.style.display = 'none';
         }
     });
-
+ 
     function formatYAxisLabel(value, scale) {
         if (scale === 'log10') {
             if (value <= 0) return '0';
@@ -499,6 +534,48 @@
         }
     }
 
+    /**
+     * 计算单条曲线的断线阈值
+     * 公式: (末尾时间 - 起始时间) / 有效点数 * 2
+     * 即：平均采样间隔的2倍作为断线阈值
+     * 
+     * @param {Array} points - 数据点数组 [[time, value], ...]
+     * @returns {number} 阈值（毫秒），最小不低于60秒
+     */
+    function calculateDisconnectThreshold(points) {
+        // 过滤掉 null 值点，只计算有效点
+        const validPoints = points.filter(p => p[1] !== null);
+        
+        // 至少需要2个有效点才能计算
+        if (validPoints.length < 2) {
+            return 30 * 60 * 1000; // 默认30分钟
+        }
+        
+        // 获取起始和结束时间
+        const firstTime = new Date(validPoints[0][0]).getTime();
+        const lastTime = new Date(validPoints[validPoints.length - 1][0]).getTime();
+        const totalDuration = lastTime - firstTime;
+        
+        // 防止时间为0或负数
+        if (totalDuration <= 0) {
+            return 30 * 60 * 1000; // 默认30分钟
+        }
+        
+        // 计算平均采样间隔
+        // 间隔数 = 有效点数 - 1
+        const intervalCount = validPoints.length - 1;
+        const avgInterval = totalDuration / intervalCount;
+        
+        // 断线阈值 = 平均间隔 * 2
+        const threshold = avgInterval * 2;
+        
+        // 设置安全边界：最小1毫秒，最大1小时
+        const minThreshold = 1;  // 1毫秒
+        const maxThreshold = 1 * 60 * 60 * 1000;  // 1小时
+        
+        return Math.max(minThreshold, Math.min(threshold, maxThreshold));
+    }
+
     function renderChart(data) {
         emptyState.style.display = 'none';
         chartContainer.style.display = 'block';
@@ -511,32 +588,46 @@
         const nonNumericDataMap = {};
         const allKeys = [];
 
-        // 首先将所有数据按时间排序
-        data.data.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-        data.data.forEach(record => {
-            const key = `${record.data_name}.${record.channel}`;
-            if (!allKeys.includes(key)) {
+        // 处理新的数据结构
+        if (data.series) {
+            Object.entries(data.series).forEach(([key, seriesInfo]) => {
                 allKeys.push(key);
-            }
-            const fieldType = fieldTypesMap[key] || 'String';
-            const isNumeric = fieldType === 'Integer' || fieldType === 'Float';
+                
+                const isSparse = seriesInfo.is_sparse || false;
+                const seriesData = seriesInfo.data || [];
+                
+                if (!isSparse) {
+                    // 数值数据
+                    if (!numericSeriesMap[key]) {
+                        numericSeriesMap[key] = [];
+                    }
+                    
+                    seriesData.forEach(point => {
+                        // 在log10模式下，过滤掉非正数
+                        if (currentScale === 'log10' && point.value <= 0) {
+                            return;
+                        }
+                        numericSeriesMap[key].push([point.time, point.value]);
+                    });
+                } else {
+                    // 稀疏数据（字符串/布尔值）
+                    if (!nonNumericDataMap[key]) {
+                        nonNumericDataMap[key] = [];
+                    }
+                    
+                    seriesData.forEach(point => {
+                        nonNumericDataMap[key].push({ 
+                            time: point.time, 
+                            value: point.value 
+                        });
+                    });
+                }
+            });
+        }
 
-            if (isNumeric) {
-                if (!numericSeriesMap[key]) {
-                    numericSeriesMap[key] = [];
-                }
-                // 在log10模式下，过滤掉非正数
-                if (currentScale === 'log10' && record.value <= 0) {
-                    return;
-                }
-                numericSeriesMap[key].push([record.time, record.value]);
-            } else {
-                if (!nonNumericDataMap[key]) {
-                    nonNumericDataMap[key] = [];
-                }
-                nonNumericDataMap[key].push({ time: record.time, value: record.value });
-            }
+        // 按时间排序数值数据
+        Object.keys(numericSeriesMap).forEach(key => {
+            numericSeriesMap[key].sort((a, b) => new Date(a[0]) - new Date(b[0]));
         });
 
         const series = [];
@@ -553,12 +644,9 @@
             
             const color = colorPalette[colorIdx % colorPalette.length];
             
-            // 对每个序列的数据点按时间排序
-            points.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-            
             // 处理数据点，添加null点来断开间隔过大的线
             const processedPoints = [];
-            const disconnectThreshold = 5 * 60 * 1000; // 5分钟（单位：毫秒），超过这个间隔就断开
+            const disconnectThreshold = calculateDisconnectThreshold(points); // 计算断开阈值
             
             for (let i = 0; i < points.length; i++) {
                 const currentPoint = points[i];
@@ -570,9 +658,7 @@
                     const nextTime = new Date(points[i + 1][0]).getTime();
                     const timeDiff = nextTime - currentTime;
                     
-                    // 如果时间间隔超过阈值，插入一个null点来断开连线
                     if (timeDiff > disconnectThreshold) {
-                        // 插入一个null点，ECharts在遇到null值时会断开连线
                         processedPoints.push([currentPoint[0], null]);
                     }
                 }
@@ -587,14 +673,15 @@
                 lineStyle: { width: 1.5, color: color },
                 itemStyle: { color: color },
                 emphasis: { lineStyle: { width: 2.5 } },
-                connectNulls: false, // 关键：设置为false，不连接null点
-                symbol: 'none' // 不显示点的符号
+                connectNulls: false,
+                symbol: 'none'
             });
             
             legendData.push(key);
             colorIdx++;
         });
 
+        // 处理稀疏数据展示
         Object.keys(nonNumericDataMap).forEach(key => {
             nonNumericDataMap[key].sort((a, b) => new Date(a.time) - new Date(b.time));
         });
@@ -604,23 +691,35 @@
             otherDataPanel.classList.add('show');
             const nonNumericKeys = Object.keys(nonNumericDataMap);
             otherDataItems.innerHTML = nonNumericKeys.map(key => {
-                return `<div class="other-data-item"><span class="label">${escapeHtml(key)}:</span><span class="value" id="value_${escapeAttr(key)}">-</span></div>`;
+                const isSparse = data.series[key]?.is_sparse || false;
+                const dataType = data.series[key]?.data_type || 'String';
+                const originalCount = data.series[key]?.original_count || 0;
+                const sampledCount = data.series[key]?.sampled_count || 0;
+                
+                let label = escapeHtml(key);
+                if (isSparse && originalCount > sampledCount) {
+                    label += ` <span style="font-size:0.8em;color:#999"></span>`;//(压缩: ${originalCount}→${sampledCount})
+                }
+                
+                return `<div class="other-data-item">
+                    <span class="label">${label}:</span>
+                    <span class="value" id="value_${escapeAttr(key)}">-</span>
+                </div>`;
             }).join('');
         } else {
             otherDataPanel.classList.remove('show');
         }
 
-        // 计算Y轴范围，为log10模式智能划分刻度
+        // 计算Y轴范围
         let yAxisMin = undefined;
         let yAxisMax = undefined;
         let yAxisInterval = undefined;
         
         if (currentScale === 'log10' && Object.keys(numericSeriesMap).length > 0) {
-            // 收集所有数值
             const allValues = [];
             Object.values(numericSeriesMap).forEach(points => {
                 points.forEach(point => {
-                    if (point[1] > 0) { // 确保是正数
+                    if (point[1] > 0) {
                         allValues.push(point[1]);
                     }
                 });
@@ -630,15 +729,12 @@
                 const minVal = Math.min(...allValues);
                 const maxVal = Math.max(...allValues);
                 
-                // 计算对数值
                 const logMin = Math.log10(minVal);
                 const logMax = Math.log10(maxVal);
                 
-                // 确保刻度是10的整数次幂
                 yAxisMin = Math.pow(10, Math.floor(logMin));
                 yAxisMax = Math.pow(10, Math.ceil(logMax));
                 
-                // 如果范围太大，使用更大的步长
                 const logRange = logMax - logMin;
                 if (logRange > 6) {
                     yAxisInterval = Math.ceil(logRange / 6);
@@ -656,7 +752,6 @@
                 trigger: 'axis',
                 axisPointer: { type: 'cross' },
                 formatter: function(params) {
-                    // 过滤掉null值
                     const validParams = params.filter(p => p.value && p.value[1] !== null);
                     if (validParams.length === 0) return '';
                     
@@ -715,6 +810,7 @@
 
         chartInstance.setOption(option, true);
 
+        // 更新非数值数据的显示
         chartInstance.off('updateAxisPointer');
         chartInstance.on('updateAxisPointer', function(event) {
             const xAxisInfo = event.axesInfo[0];
@@ -723,6 +819,14 @@
                 updateNonNumericData(currentTime, nonNumericDataMap);
             }
         });
+
+        // 初始显示最后一个时间点的稀疏数据
+        if (hasNonNumeric && Object.keys(nonNumericDataMap).length > 0) {
+            const lastTime = getLastTimeFromSeries(numericSeriesMap, nonNumericDataMap);
+            if (lastTime) {
+                updateNonNumericData(lastTime, nonNumericDataMap);
+            }
+        }
 
         function updateNonNumericData(currentTime, nonNumericDataMap) {
             const currentDate = new Date(currentTime);
@@ -744,6 +848,32 @@
             });
         }
 
+        function getLastTimeFromSeries(numericSeriesMap, nonNumericDataMap) {
+            let lastTime = null;
+            
+            // 从数值数据中获取最后时间
+            Object.values(numericSeriesMap).forEach(points => {
+                if (points.length > 0) {
+                    const pointTime = new Date(points[points.length - 1][0]);
+                    if (!lastTime || pointTime > lastTime) {
+                        lastTime = pointTime;
+                    }
+                }
+            });
+            
+            // 从非数值数据中获取最后时间
+            Object.values(nonNumericDataMap).forEach(dataList => {
+                if (dataList.length > 0) {
+                    const dataTime = new Date(dataList[dataList.length - 1].time);
+                    if (!lastTime || dataTime > lastTime) {
+                        lastTime = dataTime;
+                    }
+                }
+            });
+            
+            return lastTime;
+        }
+
         let resizeTimer;
         const resizeHandler = () => {
             clearTimeout(resizeTimer);
@@ -752,14 +882,24 @@
         window.addEventListener('resize', resizeHandler);
         setTimeout(() => chartInstance.resize(), 100);
     }
+
+    function renderChartWithCache() {
+        const dataToRender = currentScale === 'log10' ? cachedLogData : cachedLinearData;
+        if (dataToRender && dataToRender.series && Object.keys(dataToRender.series).length > 0) {
+            renderChart(dataToRender);
+        }
+    }
+
     scaleToggle.querySelectorAll('button').forEach(btn => {
         btn.addEventListener('click', () => {
             const newScale = btn.dataset.scale;
             if (newScale === currentScale) return;
             currentScale = newScale;
             scaleToggle.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scale === newScale));
-            if (currentData && currentData.data && currentData.data.length > 0) {
-                renderChart(currentData);
+            
+            // 使用缓存数据快速切换
+            if (cachedLinearData && cachedLogData) {
+                renderChartWithCache();
             }
         });
     });

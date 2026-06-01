@@ -10,7 +10,10 @@ dwsync.xml
 tests/
 
 # database
+data/
 *.db
+*.db-wal
+*.db-shm
 
 # backup files
 *copy.*

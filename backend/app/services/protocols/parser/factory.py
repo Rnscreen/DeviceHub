@@ -3,7 +3,6 @@
 """
 from typing import Type
 from ....models import ProtocolConfig
-from typing import Type
 from ..base import IResponseParser
 from ..builder.factory import CommandBuilderFactory
 
@@ -36,12 +35,14 @@ class ResponseParserFactory:
         """根据协议类型选择解析器类"""
         from . import (
             AsciiResponseParser,
-            # ModbusResponseParser
+            ModbusResponseParser
         )
         
         parser_map:dict[str, Type[IResponseParser]] = {
             'tcp': AsciiResponseParser,
-            # 'modbus_tcp': ModbusResponseParser,
-            # 'modbus_rtu': AsciiResponseParser
+            'modbus_tcp': ModbusResponseParser,
+            'modbus_rtu': ModbusResponseParser,
+            'serial': AsciiResponseParser,
+            'usb': AsciiResponseParser,
         }
         return parser_map.get(protocol_type, AsciiResponseParser)

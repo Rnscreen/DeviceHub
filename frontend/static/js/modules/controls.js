@@ -24,17 +24,17 @@ export class ControlManager {
             this.sendControlCommand();
         });
 
-        // 批量指令发送
-        this.uiManager.elements.sendBatchBtn.addEventListener('click', () => {
-            this.sendBatchCommands();
-        });
+        // // 批量指令发送
+        // this.uiManager.elements.sendBatchBtn.addEventListener('click', () => {
+        //     this.sendBatchCommands();
+        // });
 
-        // Enter键发送控制指令
-        this.uiManager.elements.paramsContainer.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.sendControlCommand();
-            }
-        });
+        // // Enter键发送控制指令
+        // this.uiManager.elements.paramsContainer.addEventListener('keypress', (e) => {
+        //     if (e.key === 'Enter') {
+        //         this.sendControlCommand();
+        //     }
+        // });
 
         // 刷新设备功能按钮（可选）
         if (this.uiManager.elements.refreshFunctionsBtn) {

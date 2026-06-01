@@ -83,6 +83,8 @@ async def get_device_data(
     fields: str = Query(None, description="逗号分隔的字段列表, 格式: data_name.channel"),
     start: Optional[datetime] = Query(None, description="开始时间"),
     end: Optional[datetime] = Query(None, description="结束时间"),
+    max_points: Optional[int] = Query(None, description="最大数据点数"),
+    interval: Optional[str] = Query(None, description="采样间隔: 比如5s, 1m, 1h"),
     db_service: SQLiteService = Depends(get_db_service)
 ):
     """获取设备历史数据"""
@@ -101,16 +103,12 @@ async def get_device_data(
             device_id=device_id,
             fields=field_list,
             start=start_str,
-            end=end_str
+            end=end_str,
+            max_points=max_points,
+            interval=interval
         )
 
-        return {
-            "device_id": device_id,
-            "start": start_str,
-            "end": end_str,
-            "count": len(data),
-            "data": data
-        }
+        return data
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
