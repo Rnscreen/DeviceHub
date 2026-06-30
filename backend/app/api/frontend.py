@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import logging
 

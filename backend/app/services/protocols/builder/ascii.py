@@ -42,6 +42,40 @@ class AsciiCommandBuilder(ICommandBuilder):
                 f"Invalid protocol type: {self.protocol_config.protocol_type}"
             )
 
+    def _get_command_template(
+        self,
+        command_type: str
+    ) -> str:
+        """获取命令模板"""
+        # 检查特定命令
+        if hasattr(self.protocol_config.command, command_type):
+            return getattr(self.protocol_config.command, command_type)
+        
+        # 检查默认命令
+        if hasattr(self.protocol_config.command, "get_default"):
+            return getattr(self.protocol_config.command, "get_default")
+                        
+        raise ValueError(
+            f"No command template found for {command_type} "
+            f"and no default command defined"
+        )
+
+    def _build_protocol_packet(
+        self,
+        commands: list[str]
+    ) -> list[str]:
+        """构建协议报文"""
+        proto = self.protocol_config.protocols
+        
+        for command in commands:
+            # 处理地址占位符
+            if "{address}" in proto.send and hasattr(self.protocol_config, "address"):
+                if self.address is None:
+                    raise ValueError("Address is required for this protocol")
+                command = command.replace("{address}", str(self.address))
+        
+        return commands
+
     def _format_command(self, command_template: str,
                        channel: Optional[str] = None,
                        value: Optional[Any] = None) -> str:

@@ -1,5 +1,32 @@
 # CHANGELOG
 <!--  -->
+## V0.1.4
+Date: 2026-06-30
+### Fixed:
+1. protocol:
+   1. 修复了update_by_dataname方法, 现在能正确更新指定的数据项(到data_cache以及device_manager上报)
+   2. 优化modebus_tcp协议, 把buidler和parser中, modbus相关的公用函数提取到`backend/utils/modbus_utils.py`中
+   3. 完善了modbus_tcp协议, 现在能够写连续多个寄存器, 使用`v1,v2,...`(*英文逗号分隔！*)格式进行写入
+      *线圈操作由于目前没有可供调试的设备, 不保证其是否能够正常工作, 请在实际情况进行测试或自行实现*
+2. device_manager: 实现从protocol进行上报回调
+3. sqlite3: 移除了连接缓存池, 现在每次操作都需要重新连接数据库, 避免连接占用导致的写入失败问题, 比之前版本需要更长的时间进行数据获取.
+4. websocket: 修复了websocket连接断开后, 服务端未正常关闭导致的阻塞问题.
+5. api: 
+   1. 移除了部分设计之初预设的不必要接口;
+   2. 修改了export接口, 现在能输出的csv更加易读, 方便使用excel\origin\python等工具进行处理
+### Added:
+1. 初步自动化支持:
+   - 增加了generate_api接口, 用于获取所有接口的文档, 可以一键生成适合AI阅读的文档, 以支持AI编写脚本, 或者被OpenClaw等Agent调用.
+   - 增加了device_sdk.py, 用于设备统一控制, 基于HTTP API和 WebSocket 的完整封装，提供简洁的设备控制接口。依赖: httpx, websockets
+   - 使用方法: 
+      1. 在`generate_api`端点, 获取该网关及其所有设备的API文档及Prompt提示词.
+      2. 将完整提示词输入进大语言模型(如GPT\Claude\Gemini\Deepseek等), 之后使用自然语言描述需要的自动化任务. 大语言模型会根据描述, 生成对应的自动化脚本.
+      3. 下载生成的自动化脚本与`device_sdk.py`放置在同一个目录下, 运行自动化脚本, 即可实现对设备的自动化控制.
+      4. 鉴于现在的AI能力, 尽可能需要将操作流程详细地表达, 包括设备ID、寄存器地址、数据值等, 最好写个MOCK进行测试, 确保脚本能够安全地运行.
+### Other:
+1. 被python折磨吐了, 不想和GIL斗智斗勇, 计划使用Node.js重构, 祝我好运qwq
+2. 换工作了, 该项目更新频率可能会变低, 重构也不知道要多久, 请见谅qwq
+
 ## V0.1.3
 Date: 2026-06-01
 ### Added:   

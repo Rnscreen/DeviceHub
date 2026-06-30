@@ -490,6 +490,15 @@
     });
  
     function formatYAxisLabel(value, scale) {
+        if (typeof value !== 'number') {
+            value = Number(value);
+            // 如果转换后还是无效，返回默认值
+            if (isNaN(value)) return '0';
+        }
+
+        // 处理无穷大
+        if (!isFinite(value)) return '0';
+        
         if (scale === 'log10') {
             if (value <= 0) return '0';
             

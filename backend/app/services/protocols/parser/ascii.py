@@ -250,7 +250,7 @@ class AsciiResponseParser(IResponseParser):
                 return None
         
         for _ in vars:
-            _=_.strip()
+            _=_.strip() if isinstance(_,str) else _ # type: ignore
 
         # 处理结果
         if parse_key in self._compiled_packages:

@@ -1,14 +1,18 @@
 # backend/app/services/protocols/handler/modbus_tcp.py
 import asyncio
+import logging
 import struct
 from typing import Any, Sequence
-import logging
 
+from ....models import (
+    ControlCommands,
+    DataCategory,
+    DataFrame,
+    PollCommands,
+    PollDataType,
+    ProtocolConfig,
+)
 from ....utils.convert_type import convert_type
-
-from ....models import PollDataType, DataFrame, DataCategory, \
-    ControlCommands, PollCommands, PollCommand, ProtocolConfig
-
 from ..base.ihandler import IHandler
 
 
@@ -256,7 +260,8 @@ class ModbusTcpHandler(IHandler):
         cmd_keys, built_commands = self.builder.build_control_command(commands)
         
         results: list[bool] = []
-        update_commands: PollCommands = []
+        # update_commands: PollCommands = []
+        update_keys: list[str] = []
 
         for cmd_key, cmd_bytes in zip(cmd_keys, built_commands):
             try:
@@ -276,14 +281,15 @@ class ModbusTcpHandler(IHandler):
                 else:
                     results.append(False)
                 
+                # 以下是手动构建 update_commands
                 # 收集需要更新的数据点（与原逻辑一致）
-                if update_keys:
-                    for uk in update_keys:
-                        data_name = uk[4:] if uk.startswith("set_") else uk
-                        channel = self.enabled_channels.get(
-                            self.dataname_to_channels.get(data_name, "main"), None
-                        )
-                        update_commands.append(PollCommand(data_name, channel))
+                # if update_keys:
+                #     for uk in update_keys:
+                #         data_name = uk[4:] if uk.startswith("set_") else uk
+                #         channel = self.enabled_channels.get(
+                #             self.dataname_to_channels.get(data_name, "main"), None
+                #         )
+                #         update_commands.append(PollCommand(data_name, channel))
                         
             except Exception as e:
                 self.logger.warning(f"Control command failed for {cmd_key}: {e}")
@@ -291,9 +297,13 @@ class ModbusTcpHandler(IHandler):
                 continue
 
         # 执行更新
-        if True: # update_commands: # 默认更新
+        if update_keys: # update_commands: # 默认更新
             try:
-                await self.execute_monitor(update_commands)
+                # await self.execute_monitor(update_commands)
+                for key in update_keys:
+                    data_name = key[4:] if key.startswith("set_") else key
+                    await asyncio.sleep(0.2)
+                    await self.update_by_dataname(data_name)
             except Exception as e:
                 self.logger.warning(f"Update poll failed: {e}")
 

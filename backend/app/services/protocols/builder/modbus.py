@@ -5,84 +5,7 @@ import logging
 from ....models import ProtocolConfig, PollCommands, ControlCommands, \
     ControlDefinition, ModbusChannel, ModbusRegister
 from ..base.ibuilder import ICommandBuilder
-
-FN_READ_COILS = 0x01
-FN_READ_DISCRETE_INPUTS = 0x02
-FN_READ_HOLDING_REGISTERS = 0x03
-FN_READ_INPUT_REGISTERS = 0x04
-FN_WRITE_SINGLE_COIL = 0x05
-FN_WRITE_SINGLE_REGISTER = 0x06
-FN_WRITE_MULTIPLE_COILS = 0x0F
-FN_WRITE_MULTIPLE_REGISTERS = 0x10
-
-READ_FNS = {0x01, 0x02, 0x03, 0x04}
-WRITE_SINGLE_FNS = {0x05, 0x06}
-WRITE_MULTIPLE_FNS = {0x0F, 0x10}
-
-TYPE_TO_STRUCT: dict[str, str] = {
-    'short': '>h',
-    'int16': '>h',
-    'uint16': '>H',
-    'int32': '>i',
-    'uint32': '>I',
-    'float': '>f',
-    'double': '>d',
-}
-
-TYPE_SIZE: dict[str, int] = {
-    'short': 2, 'int16': 2, 'uint16': 2,
-    'int32': 4, 'uint32': 4,
-    'float': 4, 'double': 8,
-    'hex': 2, 'str': 2,
-}
-
-BYTEORDER_MAP: dict[str, str] = {
-    '1234': '>',
-    '4321': '<',
-    '3412': '>',   # handled manually via byte swap
-    '2143': '<',   # handled manually via word swap
-}
-
-
-def _swap_bytes(data: bytes, order: str) -> bytes:
-    if order in ('1234', '4321'):
-        return data
-    if order == '3412':
-        return b''.join(data[i:i+2][::-1] for i in range(0, len(data), 2))
-    if order == '2143':
-        return b''.join(data[i:i+2] for i in range(len(data)-2, -1, -2))
-    return data
-
-
-def _pack_value(value: Any, reg_type: str, order: str) -> bytes:
-    fmt = TYPE_TO_STRUCT.get(reg_type, '>H')
-    base_fmt = BYTEORDER_MAP.get(order, '>')
-    fmt = base_fmt + fmt[1:]
-
-    if reg_type in ('float',):
-        value = float(value)
-    elif reg_type in ('double',):
-        value = float(value)
-    elif reg_type in ('str', 'hex'):
-        return _pack_string_or_hex(value, order, TYPE_SIZE.get(reg_type, 2) * 2)
-    elif 'int' in reg_type or reg_type == 'short':
-        value = int(value)
-    else:
-        value = int(value)
-
-    packed = struct.pack(fmt, value)
-    if order in ('3412', '2143'):
-        packed = _swap_bytes(packed, order)
-    return packed
-
-
-def _pack_string_or_hex(value: str|int, order: str, size: int) -> bytes:
-    if isinstance(value, str):
-        data = value.encode('ascii', errors='ignore').ljust(size, b'\x00')[:size]
-    else:
-        data = str(value).encode('ascii', errors='ignore').ljust(size, b'\x00')[:size]
-    return _swap_bytes(data, order) if order in ('3412', '2143') else data
-
+from ....utils.modbus_utils import *
 
 def _build_read_pdu(fc: int, address: int, count: int) -> bytes:
     return struct.pack('>BHH', fc, address, count)
@@ -104,8 +27,6 @@ def _build_write_multiple_coils_pdu(fc: int, address: int, coil_bytes: bytes) ->
     byte_count = len(coil_bytes)
     header = struct.pack('>BHHB', fc, address, quantity, byte_count)
     return header + coil_bytes
-
-
 class ModbusCommandBuilder(ICommandBuilder):
     def __init__(
         self,
@@ -116,6 +37,25 @@ class ModbusCommandBuilder(ICommandBuilder):
         self.logger = logging.getLogger(f"ModbusCommandBuilder.{protocol_config.name}")
         self._unit_id: int = 1
         self._build_register_map()
+
+    def _format_control_value(
+        self,
+        ctrl_def: ControlDefinition,
+        value: Any) -> Any:
+        """格式化控制值(覆盖默认方法)"""
+        if value is None:
+            return ""
+        # 数值类型处理
+        if ctrl_def.type == 'int':
+            return str(int(value))
+        elif ctrl_def.type == 'float':
+            return f"{float(value):.6f}".rstrip('0').rstrip('.')
+        elif ctrl_def.type == 'str':
+            if ',' in value:
+                return [item.strip() for item in str(value).split(',')]
+        
+        return str(value)
+
 
     def _build_register_map(self):
         self._data_register_map: dict[str, dict[str, ModbusRegister]] = {}
@@ -240,12 +180,12 @@ class ModbusCommandBuilder(ICommandBuilder):
                 pdu = _build_write_single_pdu(fc, reg.address, int_val)
 
             elif fc == FN_WRITE_MULTIPLE_REGISTERS:
-                values_bytes = self._encode_multi_register_value(formatted_value, reg)
+                values_bytes = encode_multi_register_value(formatted_value, reg)
                 pdu = _build_write_multiple_registers_pdu(fc, reg.address, values_bytes)
 
             elif fc == FN_WRITE_MULTIPLE_COILS:
                 coil_byte_count = (reg.registers + 7) // 8
-                coil_values = self._encode_coil_values(formatted_value, reg.registers)
+                coil_values = encode_coil_values(formatted_value, reg.registers)
                 pdu = _build_write_multiple_coils_pdu(fc, reg.address, coil_values[:coil_byte_count])
 
             else:
@@ -257,40 +197,3 @@ class ModbusCommandBuilder(ICommandBuilder):
             cmd_keys.append(cmd_key)
 
         return cmd_keys, final_commands
-
-    def _encode_multi_register_value(self, value_str: str, reg: ModbusRegister) -> bytes:
-        if reg.type in ('str', 'hex'):
-            return _pack_string_or_hex(value_str, reg.order, reg.registers * 2)
-
-        if reg.type in ('float',):
-            value = float(value_str)
-        elif reg.type in ('double',):
-            value = float(value_str)
-        elif 'int' in reg.type or reg.type == 'short':
-            if reg.factor and reg.factor != 1.0 and reg.factor != 0:
-                value = int(float(value_str) / reg.factor)
-            else:
-                value = int(float(value_str))
-        else:
-            if reg.factor and reg.factor != 1.0 and reg.factor != 0:
-                value = int(float(value_str) / reg.factor)
-            else:
-                value = int(float(value_str))
-
-        return _pack_value(value, reg.type, reg.order)
-
-    def _encode_coil_values(self, value_str: str, count: int) -> bytes:
-        try:
-            vals = [int(x.strip()) for x in value_str.split(',') if x.strip() != '']
-        except ValueError:
-            vals = [1 if value_str and value_str not in ('0', 'False', 'false') else 0] * count
-
-        while len(vals) < count:
-            vals.append(0)
-
-        byte_count = (count + 7) // 8
-        result = bytearray(byte_count)
-        for i, v in enumerate(vals[:count]):
-            if v:
-                result[i // 8] |= (1 << (i % 8))
-        return bytes(result)

@@ -121,6 +121,10 @@ class DeviceManager:
                     continue
 
                 device: IDeviceProtocol = protocol_factory.create_protocol(device_id)
+                
+                # ✅ 注册上报回调
+                device.set_report_callback(self.receive_device_report)
+                
                 self.devices[device_id] = device
                 
                 # 初始化状态
@@ -141,7 +145,7 @@ class DeviceManager:
                 continue
         
         logger.info("设备初始化完成: %d/%d 成功", success_count, len(self.device_configs))
-
+    
     async def _connect_device_async(self, device_id: str) -> None:
         """异步连接设备"""
         try:
@@ -172,6 +176,10 @@ class DeviceManager:
                 return False
 
             device: IDeviceProtocol = protocol_factory.create_protocol(device_id)
+            
+            # ✅ 注册上报回调
+            device.set_report_callback(self.receive_device_report)
+            
             self.devices[device_id] = device
             
             self.device_configs[device_id] = device_config
@@ -186,6 +194,62 @@ class DeviceManager:
             
         except Exception as e:
             logger.error("添加设备失败 %s: %s", device_id, e)
+            return False
+
+    async def receive_device_report(self, device_id: str, data: DataFrame) -> bool:
+        """接收设备被动上报的数据（作为回调函数使用）
+        
+        Args:
+            device_id: 设备ID
+            data: 设备上报的数据帧
+            
+        Returns:
+            bool: 是否成功处理
+        """
+        if device_id not in self.devices:
+            logger.warning("接收到未知设备 %s 的上报数据", device_id)
+            return False
+        
+        try:
+            current_time = datetime.now(timezone.utc)
+            
+            # 更新状态
+            self.last_poll_times[device_id] = current_time
+            self.device_status[device_id].update({
+                "last_seen": current_time,
+                "error": None
+            })
+            
+            logger.debug("设备 %s 被动上报数据: %s", device_id, data.timestamp)
+            
+            # 存储数据
+            storage_success = True
+            if self.db_service:
+                try:
+                    await self.db_service.write_device_data(data)
+                    logger.debug("设备 %s 数据已存储", device_id)
+                except Exception as e:
+                    logger.error("存储设备 %s 数据失败: %s", device_id, e)
+                    storage_success = False
+
+            # WebSocket 广播
+            broadcast_success = True
+            if self.ws_service:
+                try:
+                    await self.ws_service.send_device_update(
+                        device_id=device_id, 
+                        data=data
+                    )
+                    logger.debug("设备 %s 数据已广播", device_id)
+                except Exception as e:
+                    logger.error("向WebSocket广播设备 %s 数据失败: %s", device_id, e)
+                    broadcast_success = False
+            
+            return storage_success and broadcast_success
+
+        except Exception as e:
+            self.device_status[device_id]["error"] = str(e)
+            logger.error("处理设备 %s 被动上报数据异常: %s", device_id, e)
             return False
 
     def get_device_config(self, device_id: str) -> DeviceConfig | None:
@@ -331,7 +395,7 @@ class DeviceManager:
         if command.startswith("get_"):
             value = 'get_only'
         else:
-            value = params.get("value") if params else None
+            value = str(params.get("value")) if params else None
 
         # 获取设备协议
         device = self.get_device(device_id)
@@ -442,7 +506,7 @@ class DeviceManager:
         result: dict[str, object] = {
             "device_id": device_id,
             "device_type": protocol.device_type,
-            "channels": protocol.channels,
+            "channels": protocol.channels.all_channels,
             "enums": protocol.enums,
             "enabled_channels": enabled_channels,
             "functions": methods

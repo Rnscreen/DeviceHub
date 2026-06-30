@@ -1,7 +1,7 @@
 # backend/app/services/handler/ihandler.py
 from ...protocols.base.idevice import IDeviceProtocol
 from ....models.data_point import DataCategory, DataType, DataTypeLayer
-from typing import Any, Sequence
+from typing import Any, Awaitable, Callable, Sequence, Protocol
 from typing import  Optional, Union
 import logging
 from abc import ABC, abstractmethod
@@ -12,6 +12,9 @@ from .iconnection import IConnection
 from .ibuilder import ICommandBuilder
 from .iparser import IResponseParser
 
+class ReportCallback(Protocol):
+    """上报回调函数类型定义"""
+    async def __call__(self, device_id: str, data: "DataFrame") -> bool: ...
 class IHandler(ABC):
     """协议处理器抽象基类"""
     
@@ -40,6 +43,7 @@ class IHandler(ABC):
         self.datatype_to_data_name = self.builder.datatype_to_data_name
         self.dataname_to_channels = self.builder.dataname_to_channels
         self.alarm_values = self.builder.alarm_values
+        self._report_callback: Optional[Callable[[str, "DataFrame"], Awaitable[bool]]] = None
 
     @abstractmethod
     async def execute_monitor(self, commands: PollCommands) -> DataFrame:
@@ -176,7 +180,8 @@ class IHandler(ABC):
                     result.append(await self.execute_control(control_cache))
                     control_cache.clear()
                 else:
-                    result.append(self.execute_query(query_cache))
+                    if query_cache:
+                        result.append(self.execute_query(query_cache))
                     query_cache.clear()
         
         # 处理剩余缓存
@@ -213,15 +218,13 @@ class IHandler(ABC):
             for data_name in self.datatype_to_data_name[PollDataType.STATUS]:
                 if result.get_category(data_name) != old_status.get_category(data_name):
                     new_result.add_category(data_name, result.get_category(data_name))
-
-            result = new_result
-
+            self.data_cache[DataType.STATUS].update(new_result)
         else:
             self.data_cache[data_type.dt].update(result)
             
         return result
 
-    async def update_by_dataname(self, data_name: str) -> DataCategory:
+    async def update_by_dataname(self, data_name: str) -> None: #DataCategory:
         """根据数据名称更新数据
         
         Args:
@@ -235,13 +238,43 @@ class IHandler(ABC):
             PollCommand(data_name, self.enabled_channels.get(self.dataname_to_channels[data_name], 'main'))
         ]
 
-        layer = (await self.execute_monitor(commands))[data_type.dt]
+        data_frame = (await self.execute_monitor(commands))
+        layer = data_frame[data_type.dt]
 
         self.data_cache[data_type.dt].update(layer)
+        await self.report_data(data_frame)
 
-        return layer.get_category(data_name)
+        #return layer.get_category(data_name)
 
-    def _updatedata_cache(self, data_type: DataType, new_data: DataCategory):
+    def _update_data_cache(self, data_type: DataType, new_data: DataCategory):
         """更新DataFrame缓存中的DataTypeLayer"""
         layer = self.data_cache[data_type]
         layer.add_category(new_data.category, new_data)
+
+    def set_report_callback(self, callback: Callable[[str, "DataFrame"], Awaitable[bool]]) -> None:
+        """设置数据上报回调函数
+        
+        Args:
+            callback: 回调函数，接收 (device_id, data) 返回 bool
+        """
+        self._report_callback = callback
+        self.logger.debug(f"设备 {self.device_config.id} 已注册上报回调")
+    
+    async def report_data(self, data: "DataFrame") -> bool:
+        """设备主动上报数据
+        
+        Args:
+            data: 要上报的数据帧
+            
+        Returns:
+            bool: 是否成功处理
+        """
+        if self._report_callback:
+            try:
+                return await self._report_callback(self.device_config.id, data)
+            except Exception as e:
+                self.logger.error(f"设备 {self.device_config.id} 上报数据回调执行失败: {e}")
+                return False
+        else:
+            self.logger.warning(f"设备 {self.device_config.id} 未设置上报回调，数据丢弃")
+            return False

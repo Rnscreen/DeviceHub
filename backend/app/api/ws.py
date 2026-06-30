@@ -8,7 +8,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.websocket("/{device_id}")
-async def websocket_endpoint(websocket: WebSocket, device_id: str):
+async def websocket_endpoint(websocket: WebSocket, device_id: str) -> None:
     """WebSocket端点"""
     await ws_service.connect(websocket, device_id)
     
@@ -55,4 +55,4 @@ async def websocket_endpoint(websocket: WebSocket, device_id: str):
     except WebSocketDisconnect:
         logger.info(f"设备 {device_id} 的WebSocket连接已断开")
     finally:
-        ws_service.disconnect(websocket, device_id)
+        await ws_service.disconnect(websocket, device_id)

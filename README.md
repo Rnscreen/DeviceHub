@@ -1,7 +1,8 @@
 # DeviceHub 工业设备监控网关
 
-基于 Python FastAPI 的工业设备数据采集、监控和控制网关服务。支持通过 TCP 协议与多种工业设备（温控仪、压力计、流量计、泵等）通信，提供 WebSocket 实时数据推送和 HTTP 历史数据查询接口。
+基于 Python FastAPI 的工业设备数据采集、监控和控制网关服务。支持通过 TCP 、Modbus TCP 协议与多种工业设备（温控仪、压力计、流量计、泵等）通信，提供 WebSocket 实时数据推送和 HTTP 历史数据查询接口。
 [->bilibili演示视频](https://b23.tv/BV1Sn9eBLEzF)
+~~->配置教程: 啊啊啊还没写也没录屏幕, 有什么不懂请在issue提问或者email我~~
 
 ## 示意图
 
@@ -19,7 +20,7 @@ graph TB
     end
 
     subgraph Service["⚙️ 服务层"]
-        Factory[协议工厂 factory.py<br/>动态创建协议实例]
+        Factory[设备管理器 devices.py<br/>动态创建设备实例]
         
         subgraph Protocols["协议实现"]
             TCP[TcpProtocol<br/>ASCII文本协议]
@@ -123,7 +124,7 @@ sequenceDiagram
     rect rgb(200, 230, 255)
         Note over Web,Device: ① 设备控制流程
         Web->>API: WebSocket 控制指令
-        API->>Factory: 获取协议实例
+        API->>Device: 获取协议实例
         Factory->>Protocol: 转发指令
         Protocol->>Device: TCP/Modbus 发送
         Device-->>Protocol: 响应数据
@@ -157,12 +158,15 @@ sequenceDiagram
 1. 架构设计
    1. 分层架构：清晰的协议层、服务层、API层分离
    2. 模块化扩展：易于添加新设备类型和通信协议
-   3. 配置驱动：YAML 配置文件驱动设备定义和协议规则
+   3. 配置驱动：YAML 配置文件驱动设备定义和协议规则, 
+        修改`config/devices.yaml`, 暂不支持热更新, 需要重启服务
+        修改`config/protocols/`, 支持热更新, 可以快速调试设备协议
+   4. 数据存储：SQLite3 时序数据库存储
 2. 协议支持
    1. TcpProtocol：标准的 ASCII 文本协议（已实现）
-   2. ModbusTcpProtocol：Modbus TCP 协议（待实现）
-   3. ModbusProtocol：串口 Modbus 协议（待实现）
-   4. AsciiSerialProtocol：ASCII 串口协议（待实现, 目前可使用串口服务器通过 TCP over Serial实现通信）
+   2. ModbusTcpProtocol：Modbus TCP 协议（读写寄存器已实现、读写线圈暂未测试）
+   3. ModbusProtocol：串口 Modbus 协议（待实现, 已有ModbusTcp提供的pdu解析器）
+   4. AsciiSerialProtocol：ASCII 串口协议（待实现, 目前可使用串口服务器通过 Serial over TCP 实现通信, 如果有更高的性能需求, 可以考虑USB CDC扩展）
    5. 更多协议等待支持...
 3. 数据管理
    1. 实时数据：WebSocket 实时推送
@@ -258,7 +262,4 @@ sequenceDiagram
 3. 具体法律条款以 [LICENSE](LICENSE) 文件为准
 
 ***
-
-版本: V0.1.2
-最后更新: 2026年4月29日
-DeviceHub - 让设备接入更简单(bushi)\~
+~~DeviceHub - 让设备接入更简单(bushi)~~

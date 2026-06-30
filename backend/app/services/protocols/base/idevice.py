@@ -11,7 +11,6 @@ from logging import Logger
 from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
 
 from ....models import (
-    DataCategory,
     DataFrame,
     DataType,
     DataCache,
@@ -166,7 +165,7 @@ class IDeviceProtocol:
             raise RuntimeError("Handler not initialized")
         return await self._handler.update_by_datatype(poll_data_type)
 
-    async def update_by_dataname(self, data_name: str) -> DataCategory:
+    async def update_by_dataname(self, data_name: str) -> None: #DataCategory:
         """更新指定的数据项(根据data_name在data中查找)
 
         Args:
@@ -175,7 +174,8 @@ class IDeviceProtocol:
         if self._handler is None:
             raise RuntimeError("Handler not initialized")
 
-        return await self._handler.update_by_dataname(data_name)
+        await self._handler.update_by_dataname(data_name)
+        # return await self._handler.update_by_dataname(data_name)
 
     async def execute_control(
         self, control_name: str, channel: str, value: str
@@ -210,6 +210,14 @@ class IDeviceProtocol:
     def connected(self) -> bool:
         """是否已连接"""
         return self._connection.connected # type: ignore
+    # ------------上报数据------------
+    @property
+    def set_report_callback(self):
+        """设置上报数据"""
+        if self._handler is None:
+            raise RuntimeError("Handler not initialized")
+        return self._handler.set_report_callback
+
     # --------- 安全方法 ----------
     async def __exit__(self, *exc:Any):
         await self.disconnect()

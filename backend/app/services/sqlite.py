@@ -6,7 +6,7 @@ import logging
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import threading
+import re
 
 from ..models.data_point import DataFrame, DataType, DataTypeLayer, DataCategory
 
@@ -22,8 +22,6 @@ class SQLiteService:
         else:
             self.db_dir: str = db_dir
         os.makedirs(self.db_dir, exist_ok=True)
-        self.conn_cache: dict[str, sqlite3.Connection] = {}
-        self._conn_lock = threading.Lock()  # 连接缓存锁
         # 增大线程池，避免阻塞
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sqlite_worker")
         
@@ -42,66 +40,73 @@ class SQLiteService:
         return True
 
     def _get_conn(self, db_path: str) -> sqlite3.Connection:
-        """线程安全的获取数据库连接"""
-        with self._conn_lock:
-            if db_path not in self.conn_cache:
-                conn = sqlite3.connect(db_path, check_same_thread=False)
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA busy_timeout=5000")
-                self.conn_cache[db_path] = conn
-                self._init_tables(conn)
-            return self.conn_cache[db_path]
+        """创建新的数据库连接（每次操作后需要关闭）"""
+        conn = sqlite3.connect(
+            db_path,
+            timeout=5.0
+        )
+
+        conn.row_factory = sqlite3.Row
+
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+
+        return conn
     
-    def _init_tables(self, conn: sqlite3.Connection) -> None:
+    def _init_tables_for_path(self, db_path: str) -> None:
+        """为指定数据库文件初始化表结构"""
+        conn = self._get_conn(db_path)
         cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS data_index (
-                index_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                device_id VARCHAR(50),
-                data_name VARCHAR(50),
-                channel VARCHAR(50),
-                data_type VARCHAR(20),
-                start_time TIMESTAMP,
-                end_time TIMESTAMP,
-                record_count INTEGER DEFAULT 0,
-                UNIQUE(device_id, data_name, channel)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_index_device 
-            ON data_index(device_id)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_index_time_range 
-            ON data_index(start_time, end_time)
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                index_id INTEGER,
-                data_value REAL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (index_id) REFERENCES data_index(index_id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_data_index_id 
-            ON data(index_id)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_data_timestamp 
-            ON data(timestamp)
-        ''')
-        
-        conn.commit()
-        cursor.close()
+        try:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS data_index (
+                    index_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id VARCHAR(50),
+                    data_name VARCHAR(50),
+                    channel VARCHAR(50),
+                    data_type VARCHAR(20),
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    record_count INTEGER DEFAULT 0,
+                    UNIQUE(device_id, data_name, channel)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_index_device 
+                ON data_index(device_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_index_time_range 
+                ON data_index(start_time, end_time)
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    index_id INTEGER,
+                    data_value TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (index_id) REFERENCES data_index(index_id)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_data_index_id 
+                ON data(index_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_data_timestamp 
+                ON data(timestamp)
+            ''')
+            
+            conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
     
     async def write_device_data(self, data_frame: DataFrame) -> None:
         loop = asyncio.get_event_loop()
@@ -115,6 +120,9 @@ class SQLiteService:
         timestamp = datetime.fromisoformat(data_frame.timestamp)
         
         db_path = self._get_db_path(timestamp)
+        # 确保表存在
+        self._init_tables_for_path(db_path)
+        
         conn = self._get_conn(db_path)
         device_id = data_frame.id
 
@@ -173,6 +181,7 @@ class SQLiteService:
             conn.rollback()
         finally:
             cursor.close()
+            conn.close()
     
     async def query_device_data(
         self, 
@@ -371,10 +380,9 @@ class SQLiteService:
         channels: dict[str, dict[str, Any]] = {}
         
         for db_file in target_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
             try:
-                conn = self._get_conn(db_file)
-                cursor = conn.cursor()
-                
                 query = """
                     SELECT DISTINCT di.data_name, di.channel, di.data_type
                     FROM data_index di
@@ -412,11 +420,12 @@ class SQLiteService:
                             "data_type": row["data_type"]
                         }
                 
-                cursor.close()
-                
             except Exception as e:
                 logger.error(f"获取通道信息失败 {db_file}: {e}")
                 continue
+            finally:
+                cursor.close()
+                conn.close()
         
         return list(channels.values())
     
@@ -434,10 +443,9 @@ class SQLiteService:
         results: list[dict[str, Any]] = []
         
         for db_file in target_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
             try:
-                conn = self._get_conn(db_file)
-                cursor = conn.cursor()
-                
                 cursor.execute("""
                     SELECT d.data_value, d.timestamp
                     FROM data d
@@ -456,11 +464,12 @@ class SQLiteService:
                         "value": row["data_value"]
                     })
                 
-                cursor.close()
-                
             except Exception as e:
                 logger.error(f"查询通道数据失败 {db_file}: {e}")
                 continue
+            finally:
+                cursor.close()
+                conn.close()
         
         results.sort(key=lambda x: x["time"])
         return results
@@ -478,10 +487,9 @@ class SQLiteService:
         
         total = 0
         for db_file in target_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
             try:
-                conn = self._get_conn(db_file)
-                cursor = conn.cursor()
-                
                 cursor.execute("""
                     SELECT COUNT(*) as cnt
                     FROM data d
@@ -497,11 +505,12 @@ class SQLiteService:
                 if row:
                     total += row["cnt"]
                 
-                cursor.close()
-                
             except Exception as e:
                 logger.error(f"查询通道计数失败 {db_file}: {e}")
                 continue
+            finally:
+                cursor.close()
+                conn.close()
         
         return total
     
@@ -531,10 +540,9 @@ class SQLiteService:
         start_epoch = start_dt.timestamp()
         
         for db_file in target_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
             try:
-                conn = self._get_conn(db_file)
-                cursor = conn.cursor()
-                
                 # 使用 ROW_NUMBER() OVER (PARTITION BY 时间桶 ORDER BY 时间)
                 # 每个时间桶取第一个点
                 cursor.execute("""
@@ -566,11 +574,12 @@ class SQLiteService:
                         "value": row["data_value"]
                     })
                 
-                cursor.close()
-                
             except Exception as e:
                 logger.error(f"采样查询失败 {db_file}: {e}")
                 continue
+            finally:
+                cursor.close()
+                conn.close()
         
         # 跨文件结果排序
         results.sort(key=lambda x: x["time"])
@@ -586,33 +595,31 @@ class SQLiteService:
         """简化版：获取时间范围内的数据库文件列表"""
         target_files: set[str] = set()
         
-        # 先从缓存连接中查找
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    cursor.execute("""
-                        SELECT 1 FROM data_index 
-                        WHERE device_id = ? AND start_time <= ? AND end_time >= ?
-                        LIMIT 1
-                    """, (device_id, end, start))
-                    
-                    if cursor.fetchone():
-                        db_path = Path(db_conn.execute("PRAGMA database_list").fetchone()[2])
-                        if db_path.exists():
-                            target_files.add(str(db_path))
-                    
-                    cursor.close()
-                    
-                except Exception as e:
-                    logger.warning(f"查询索引表失败: {e}")
+        # 扫描文件系统获取所有可能的数据库文件
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+        db_files = self._get_db_files_in_range(start_dt, end_dt)
         
-        # 如果缓存中没有，扫描文件系统
-        if not target_files:
-            start_dt = datetime.fromisoformat(start)
-            end_dt = datetime.fromisoformat(end)
-            db_files = self._get_db_files_in_range(start_dt, end_dt)
-            target_files.update(db_files)
+        # 检查每个文件是否包含目标设备的数据
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    SELECT 1 FROM data_index 
+                    WHERE device_id = ? AND start_time <= ? AND end_time >= ?
+                    LIMIT 1
+                """, (device_id, end, start))
+                
+                if cursor.fetchone():
+                    target_files.add(db_file)
+                
+            except Exception as e:
+                logger.warning(f"查询索引表失败 {db_file}: {e}")
+                continue
+            finally:
+                cursor.close()
+                conn.close()
         
         return target_files
     
@@ -626,54 +633,53 @@ class SQLiteService:
         """获取需要查询的数据库文件列表"""
         target_files: set[str] = set()
         
-        # 先从缓存连接中查找
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    
-                    index_query = '''
-                        SELECT DISTINCT index_id FROM data_index 
-                        WHERE device_id = ? AND start_time <= ? AND end_time >= ?
-                    '''
-                    index_params: list[Any] = [device_id, end, start]
-                    
-                    if fields:
-                        field_conditions: list[str] = []
-                        for field in fields:
-                            data_name, channel = self._parse_parameter_field(field)
-                            conditions: list[str] = []
-                            if data_name:
-                                conditions.append("data_name = ?")
-                                index_params.append(data_name)
-                            if channel:
-                                conditions.append("channel = ?")
-                                index_params.append(channel)
-                            
-                            if conditions:
-                                field_conditions.append("(" + " AND ".join(conditions) + ")")
-                        
-                        if field_conditions:
-                            index_query += " AND (" + " OR ".join(field_conditions) + ")"
-                    
-                    cursor.execute(index_query, index_params)
-                    
-                    for _ in cursor:
-                        db_path = Path(db_conn.execute("PRAGMA database_list").fetchone()[2])
-                        if db_path.exists():
-                            target_files.add(str(db_path))
-                    
-                    cursor.close()
-                    
-                except Exception as e:
-                    logger.warning(f"查询索引表失败: {e}")
+        # 扫描文件系统获取所有可能的数据库文件
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+        db_files = self._get_db_files_in_range(start_dt, end_dt)
         
-        # 如果缓存中没有，扫描文件系统
-        if not target_files:
-            start_dt = datetime.fromisoformat(start)
-            end_dt = datetime.fromisoformat(end)
-            db_files = self._get_db_files_in_range(start_dt, end_dt)
-            target_files.update(db_files)
+        # 检查每个文件是否包含目标设备和字段的数据
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                index_query = '''
+                    SELECT 1 FROM data_index 
+                    WHERE device_id = ? AND start_time <= ? AND end_time >= ?
+                '''
+                index_params: list[Any] = [device_id, end, start]
+                
+                if fields:
+                    field_conditions: list[str] = []
+                    for field in fields:
+                        data_name, channel = self._parse_parameter_field(field)
+                        conditions: list[str] = []
+                        if data_name:
+                            conditions.append("data_name = ?")
+                            index_params.append(data_name)
+                        if channel:
+                            conditions.append("channel = ?")
+                            index_params.append(channel)
+                        
+                        if conditions:
+                            field_conditions.append("(" + " AND ".join(conditions) + ")")
+                    
+                    if field_conditions:
+                        index_query += " AND (" + " OR ".join(field_conditions) + ")"
+                
+                index_query += " LIMIT 1"
+                
+                cursor.execute(index_query, index_params)
+                
+                if cursor.fetchone():
+                    target_files.add(db_file)
+                
+            except Exception as e:
+                logger.warning(f"查询索引表失败 {db_file}: {e}")
+                continue
+            finally:
+                cursor.close()
+                conn.close()
         
         return target_files
     
@@ -706,7 +712,6 @@ class SQLiteService:
         Returns:
             秒数
         """
-        import re
         match = re.match(r'^(\d+)(s|m|h|d)$', interval)
         if not match:
             raise ValueError(f"Invalid interval format: {interval}")
@@ -767,40 +772,47 @@ class SQLiteService:
     def get_all_device_ids(self) -> list[str]:
         """获取所有有历史数据的设备ID"""
         device_ids: set[str] = set()
-        self._scan_db_files()
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    cursor.execute('SELECT DISTINCT device_id FROM data_index')
-                    for row in cursor:
-                        device_ids.add(row[0])
-                    cursor.close()
-                except Exception as e:
-                    logger.warning(f"获取设备ID列表失败: {e}")
+        
+        db_files = self._scan_db_files()
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                cursor.execute('SELECT DISTINCT device_id FROM data_index')
+                for row in cursor:
+                    device_ids.add(row[0])
+            except Exception as e:
+                logger.warning(f"获取设备ID列表失败 {db_file}: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+                
         return sorted(device_ids)
 
     def get_device_fields(self, device_id: str) -> list[dict[str, Any]]:
         """获取设备可用的数据类型和通道列表"""
         fields_map: dict[str, dict[str, set[str]]] = {}
-        self._scan_db_files()
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    cursor.execute(
-                        'SELECT DISTINCT data_name, data_type, channel FROM data_index WHERE device_id = ?',
-                        (device_id,)
-                    )
-                    for row in cursor:
-                        data_name, data_type, channel = row[0], row[1], row[2]
-                        if data_name not in fields_map:
-                            fields_map[data_name] = {"data_type": data_type, "channels": set()}
-                        if channel:
-                            fields_map[data_name]["channels"].add(channel)
-                    cursor.close()
-                except Exception as e:
-                    logger.warning(f"获取设备字段列表失败: {e}")
+        
+        db_files = self._scan_db_files()
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    'SELECT DISTINCT data_name, data_type, channel FROM data_index WHERE device_id = ?',
+                    (device_id,)
+                )
+                for row in cursor:
+                    data_name, data_type, channel = row[0], row[1], row[2]
+                    if data_name not in fields_map:
+                        fields_map[data_name] = {"data_type": data_type, "channels": set()}
+                    if channel:
+                        fields_map[data_name]["channels"].add(channel)
+            except Exception as e:
+                logger.warning(f"获取设备字段列表失败 {db_file}: {e}")
+            finally:
+                cursor.close()
+                conn.close()
         
         result: list[dict[str, Any]] = []
         for data_name in sorted(fields_map.keys()):
@@ -815,66 +827,69 @@ class SQLiteService:
         """获取设备数据的时间范围"""
         min_time = None
         max_time = None
-        self._scan_db_files()
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    cursor.execute(
-                        'SELECT MIN(start_time), MAX(end_time) FROM data_index WHERE device_id = ?',
-                        (device_id,)
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0]:
-                        if min_time is None or row[0] < min_time:
-                            min_time = row[0]
-                    if row and row[1]:
-                        if max_time is None or row[1] > max_time:
-                            max_time = row[1]
-                    cursor.close()
-                except Exception as e:
-                    logger.warning(f"获取设备时间范围失败: {e}")
+        
+        db_files = self._scan_db_files()
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    'SELECT MIN(start_time), MAX(end_time) FROM data_index WHERE device_id = ?',
+                    (device_id,)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    if min_time is None or row[0] < min_time:
+                        min_time = row[0]
+                if row and row[1]:
+                    if max_time is None or row[1] > max_time:
+                        max_time = row[1]
+            except Exception as e:
+                logger.warning(f"获取设备时间范围失败 {db_file}: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+                
         return {"start_time": min_time, "end_time": max_time}
 
-    def _scan_db_files(self) -> None:
-        """扫描数据目录中所有数据库文件并建立连接"""
+    def _scan_db_files(self) -> list[str]:
+        """扫描数据目录中所有数据库文件"""
+        db_files: list[str] = []
         data_path = Path(self.db_dir)
         if not data_path.exists():
-            return
+            return db_files
+            
         for year_dir in data_path.iterdir():
             if not year_dir.is_dir() or not year_dir.name.isdigit():
                 continue
             for db_file in year_dir.glob("data_*.db"):
-                db_path = str(db_file)
-                if db_path not in self.conn_cache:
-                    self._get_conn(db_path)
+                db_files.append(str(db_file))
+                
+        return db_files
 
     def optimize_indexes(self) -> None:
         """优化索引表，清理无效记录"""
-        with self._conn_lock:
-            for db_conn in self.conn_cache.values():
-                try:
-                    cursor = db_conn.cursor()
-                    
-                    cursor.execute('''
-                        UPDATE data_index 
-                        set record_count = (
-                            SELECT COUNT(*) FROM data 
-                            WHERE data.index_id = data_index.index_id
-                        )
-                    ''')
-                    
-                    db_conn.commit()
-                    cursor.close()
-                    
-                except Exception as e:
-                    logger.error(f"优化索引失败: {e}")
+        db_files = self._scan_db_files()
+        for db_file in db_files:
+            conn = self._get_conn(db_file)
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    UPDATE data_index 
+                    set record_count = (
+                        SELECT COUNT(*) FROM data 
+                        WHERE data.index_id = data_index.index_id
+                    )
+                ''')
+                
+                conn.commit()
+                
+            except Exception as e:
+                logger.error(f"优化索引失败 {db_file}: {e}")
+            finally:
+                cursor.close()
+                conn.close()
 
     async def close_all(self) -> None:
-        """关闭所有数据库连接和线程池"""
-        with self._conn_lock:
-            for conn in self.conn_cache.values():
-                conn.close()
-            self.conn_cache.clear()
-        
+        """关闭线程池"""
         self.executor.shutdown(wait=True)

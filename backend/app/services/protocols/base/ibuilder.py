@@ -98,14 +98,6 @@ class ICommandBuilder(ABC):
         """
         pass
 
-    def _get_command_priority(self, data_name: str) -> list[str]:
-        """获取命令构建优先级: get_all_xxx > get_xxx > get_default"""
-        priority:list[str] = []
-        
-        priority.append(self.commands.get_command(data_name))
-        
-        return priority
-
     def _format_command(self, command_template: str,
                        channel: Optional[str] = None,
                        value: Optional[Any] = None) -> str:
@@ -137,40 +129,6 @@ class ICommandBuilder(ABC):
             raise ValueError(
                 f"No data definition found for {data_name}"
             )
-
-    def _get_command_template(
-        self,
-        command_type: str
-    ) -> str:
-        """获取命令模板"""
-        # 检查特定命令
-        if hasattr(self.protocol_config.command, command_type):
-            return getattr(self.protocol_config.command, command_type)
-        
-        # 检查默认命令
-        if self.protocol_config.command.get_default:
-            return self.protocol_config.command.get_default
-            
-        raise ValueError(
-            f"No command template found for {command_type} "
-            f"and no default command defined"
-        )
-
-    def _build_protocol_packet(
-        self,
-        commands: list[str]
-    ) -> list[str]:
-        """构建协议报文"""
-        proto = self.protocol_config.protocols
-        
-        for command in commands:
-            # 处理地址占位符
-            if "{address}" in proto.send and hasattr(self.protocol_config, "address"):
-                if self.address is None:
-                    raise ValueError("Address is required for this protocol")
-                command = command.replace("{address}", str(self.address))
-        
-        return commands
 
     def _validate_control_value(
         self,
@@ -217,8 +175,8 @@ class ICommandBuilder(ABC):
     def _format_control_value(
         self,
         ctrl_def: ControlDefinition,
-        value: Union[float, int, str, bool, None]
-    ) -> str:
+        value: Any
+    ) -> Any:
         """格式化控制值"""
         if value is None:
             return ""

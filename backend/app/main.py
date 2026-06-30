@@ -1,4 +1,5 @@
 # backend/app/main.py
+import time
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
@@ -14,7 +15,11 @@ from .api import devices, data, ws
 from .services import device_manager, polling_service, db_service, ws_service, file_watcher
 
 # 配置日志
+(settings.ROOT_PATH / 'logs').mkdir(parents=True, exist_ok=True)    # 确保日志目录存在
+
 logging.basicConfig(
+    filename=f"{settings.ROOT_PATH / 'logs' / settings.APP_NAME}_{time.strftime('%Y%m%d%H%M%S')}.log",  # 日志文件路径
+    filemode='a',
     level=getattr(logging, settings.LOG_LEVEL.upper()),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
